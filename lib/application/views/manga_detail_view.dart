@@ -33,6 +33,7 @@ class _MangaDetailViewState extends State<MangaDetailView> {
   String? _errorMessage;
   bool _isDescriptionExpanded = false;
   ChapterViewEntity? _selectedChapter;
+  bool _showImageZoom = false;
 
   @override
   void initState() {
@@ -97,7 +98,15 @@ class _MangaDetailViewState extends State<MangaDetailView> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: DraculaTheme.purple),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            if (_showImageZoom) {
+              setState(() {
+                _showImageZoom = false;
+              });
+            } else {
+              Navigator.of(context).pop();
+            }
+          },
         ),
         title: Text(
           _mangaDetail?.title ?? widget.manga.title,
@@ -109,7 +118,12 @@ class _MangaDetailViewState extends State<MangaDetailView> {
           overflow: TextOverflow.ellipsis,
         ),
       ),
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+          if (_showImageZoom) _buildImageZoomOverlay(),
+        ],
+      ),
     );
   }
 
@@ -198,42 +212,79 @@ class _MangaDetailViewState extends State<MangaDetailView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Imagen de portada
-          Container(
-            width: 120,
-            height: 180,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: DraculaTheme.selection,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: CachedNetworkImage(
-                imageUrl: manga.linkImage,
-                httpHeaders: {
-                  'Referer': manga.referer ?? '',
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                },
-                fit: BoxFit.cover,
-                memCacheWidth: 240,
-                memCacheHeight: 360,
-                placeholder: (context, url) => Container(
-                  color: DraculaTheme.selection,
-                  child: const Center(
-                    child: CircularProgressIndicator(
-                      color: DraculaTheme.purple,
-                      strokeWidth: 2,
-                    ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _showImageZoom = true;
+              });
+            },
+            child: Container(
+              width: 120,
+              height: 180,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: DraculaTheme.selection,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-                errorWidget: (context, url, error) => Container(
-                  color: DraculaTheme.selection,
-                  child: const Center(
-                    child: Icon(
-                      Icons.broken_image,
-                      color: DraculaTheme.comment,
-                      size: 48,
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: manga.linkImage,
+                      httpHeaders: {
+                        'Referer': manga.referer ?? '',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                      },
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                      memCacheWidth: 240,
+                      memCacheHeight: 360,
+                      placeholder: (context, url) => Container(
+                        color: DraculaTheme.selection,
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            color: DraculaTheme.purple,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        color: DraculaTheme.selection,
+                        child: const Center(
+                          child: Icon(
+                            Icons.broken_image,
+                            color: DraculaTheme.comment,
+                            size: 48,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    // Overlay sutil para indicar que es clickeable
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.zoom_in,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -535,6 +586,135 @@ class _MangaDetailViewState extends State<MangaDetailView> {
               color: DraculaTheme.background,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageZoomOverlay() {
+    final manga = _mangaDetail ?? widget.manga;
+    
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _showImageZoom = false;
+          });
+        },
+        child: Container(
+          color: Colors.black.withOpacity(0.9),
+          child: Stack(
+            children: [
+              // Imagen con zoom
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.9,
+                      maxHeight: MediaQuery.of(context).size.height * 0.8,
+                    ),
+                    child: CachedNetworkImage(
+                      imageUrl: manga.linkImage,
+                      httpHeaders: {
+                        'Referer': manga.referer ?? '',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                      },
+                      fit: BoxFit.contain,
+                      placeholder: (context, url) => Container(
+                        width: 200,
+                        height: 300,
+                        color: DraculaTheme.selection,
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            color: DraculaTheme.purple,
+                            strokeWidth: 3,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        width: 200,
+                        height: 300,
+                        color: DraculaTheme.selection,
+                        child: const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image,
+                                color: DraculaTheme.red,
+                                size: 64,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'Error al cargar imagen',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Botón de cerrar
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 16,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showImageZoom = false;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Indicador de ayuda
+              Positioned(
+                bottom: MediaQuery.of(context).padding.bottom + 32,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Pellizca para hacer zoom • Toca para cerrar',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
