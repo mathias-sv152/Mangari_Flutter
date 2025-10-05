@@ -1,0 +1,542 @@
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:mangari/core/theme/dracula_theme.dart';
+import 'package:mangari/domain/entities/manga_detail_entity.dart';
+import 'package:mangari/domain/entities/server_entity_v2.dart';
+import 'package:mangari/domain/entities/chapter_entity.dart';
+import 'package:mangari/domain/entities/genre_entity.dart';
+import 'package:mangari/domain/entities/editorial_entity.dart';
+import 'package:mangari/domain/entities/chapter_view_entity.dart';
+import 'package:mangari/application/services/mangadx_service.dart';
+import 'package:mangari/core/di/service_locator.dart';
+import 'package:mangari/application/views/manga_reader_view.dart';
+
+class MangaDetailView extends StatefulWidget {
+  final MangaDetailEntity manga;
+  final ServerEntity server;
+
+  const MangaDetailView({
+    super.key,
+    required this.manga,
+    required this.server,
+  });
+
+  @override
+  State<MangaDetailView> createState() => _MangaDetailViewState();
+}
+
+class _MangaDetailViewState extends State<MangaDetailView> {
+  final MangaDxService _mangaService = getIt<MangaDxService>();
+  
+  MangaDetailEntity? _mangaDetail;
+  bool _isLoading = true;
+  String? _errorMessage;
+  bool _isDescriptionExpanded = false;
+  ChapterViewEntity? _selectedChapter;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMangaDetails();
+  }
+
+  Future<void> _loadMangaDetails() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+
+      final detailedManga = await _mangaService.getMangaDetail(widget.manga);
+      
+      setState(() {
+        _mangaDetail = detailedManga;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+        _mangaDetail = widget.manga; // Usar datos básicos como fallback
+      });
+    }
+  }
+
+  void _onChapterTap(ChapterEntity chapter, EditorialEntity editorial) {
+    final chapterView = ChapterViewEntity(
+      editorialName: editorial.editorialName,
+      editorialLink: editorial.editorialLink,
+      chapterTitle: chapter.numAndTitleCap,
+    );
+
+    setState(() {
+      _selectedChapter = chapterView;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Si hay un capítulo seleccionado, mostrar el lector
+    if (_selectedChapter != null) {
+      return MangaReaderView(
+        chapter: _selectedChapter!,
+        server: widget.server,
+        mangaTitle: widget.manga.title,
+        onBack: () {
+          setState(() {
+            _selectedChapter = null;
+          });
+        },
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: DraculaTheme.background,
+      appBar: AppBar(
+        backgroundColor: DraculaTheme.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: DraculaTheme.purple),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          _mangaDetail?.title ?? widget.manga.title,
+          style: const TextStyle(
+            color: DraculaTheme.foreground,
+            fontSize: 18,
+            fontWeight: FontWeight.w500,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: DraculaTheme.purple),
+            SizedBox(height: 16),
+            Text(
+              'Cargando detalles...',
+              style: TextStyle(
+                color: DraculaTheme.foreground,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_errorMessage != null && _mangaDetail == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: DraculaTheme.red,
+                size: 64,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Error al cargar detalles',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: DraculaTheme.foreground,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: DraculaTheme.red),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _loadMangaDetails,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reintentar'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: DraculaTheme.purple,
+                  foregroundColor: DraculaTheme.background,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final manga = _mangaDetail ?? widget.manga;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeroSection(manga),
+          if (manga.genres.isNotEmpty) _buildGenresSection(manga.genres),
+          if (manga.description.isNotEmpty) _buildDescriptionSection(manga.description),
+          _buildChaptersSection(manga.chapters),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroSection(MangaDetailEntity manga) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: DraculaTheme.currentLine,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Imagen de portada
+          Container(
+            width: 120,
+            height: 180,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: DraculaTheme.selection,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CachedNetworkImage(
+                imageUrl: manga.linkImage,
+                httpHeaders: {
+                  'Referer': manga.referer ?? '',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                },
+                fit: BoxFit.cover,
+                memCacheWidth: 240,
+                memCacheHeight: 360,
+                placeholder: (context, url) => Container(
+                  color: DraculaTheme.selection,
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      color: DraculaTheme.purple,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                ),
+                errorWidget: (context, url, error) => Container(
+                  color: DraculaTheme.selection,
+                  child: const Center(
+                    child: Icon(
+                      Icons.broken_image,
+                      color: DraculaTheme.comment,
+                      size: 48,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          
+          // Detalles del manga
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  manga.title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: DraculaTheme.foreground,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                
+                if (manga.author.isNotEmpty && manga.author != 'Autor desconocido')
+                  _buildInfoRow(Icons.person, manga.author),
+                
+                if (manga.status.isNotEmpty && manga.status != 'Estado desconocido')
+                  _buildInfoRow(Icons.info_outline, manga.status),
+                
+                const SizedBox(height: 12),
+                
+                // Badges
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildBadge(manga.bookType, DraculaTheme.purple),
+                    if (manga.demography.isNotEmpty && manga.demography != 'N/A')
+                      _buildBadge(manga.demography, DraculaTheme.cyan),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: DraculaTheme.comment),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: DraculaTheme.foreground,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: DraculaTheme.background,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGenresSection(List<GenreEntity> genres) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: DraculaTheme.currentLine, width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Géneros',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: DraculaTheme.foreground,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: genres.map((genre) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: DraculaTheme.currentLine,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                genre.text,
+                style: const TextStyle(
+                  color: DraculaTheme.foreground,
+                  fontSize: 12,
+                ),
+              ),
+            )).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDescriptionSection(String description) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: DraculaTheme.currentLine, width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Sinopsis',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: DraculaTheme.foreground,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(
+              color: DraculaTheme.foreground,
+              fontSize: 14,
+              height: 1.4,
+            ),
+            maxLines: _isDescriptionExpanded ? null : 3,
+            overflow: _isDescriptionExpanded ? null : TextOverflow.ellipsis,
+          ),
+          if (description.length > 150)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _isDescriptionExpanded = !_isDescriptionExpanded;
+                });
+              },
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                _isDescriptionExpanded ? 'Mostrar menos' : 'Mostrar más',
+                style: const TextStyle(
+                  color: DraculaTheme.purple,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChaptersSection(List<ChapterEntity> chapters) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Capítulos',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: DraculaTheme.foreground,
+            ),
+          ),
+          const SizedBox(height: 12),
+          
+          if (chapters.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'No hay capítulos disponibles',
+                  style: TextStyle(
+                    color: DraculaTheme.comment,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: chapters.length,
+              itemBuilder: (context, index) {
+                final chapter = chapters[index];
+                return _buildChapterItem(chapter);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChapterItem(ChapterEntity chapter) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: DraculaTheme.currentLine,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  chapter.numAndTitleCap,
+                  style: const TextStyle(
+                    color: DraculaTheme.foreground,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.check_circle_outline,
+                size: 16,
+                color: DraculaTheme.comment,
+              ),
+            ],
+          ),
+          
+          if (chapter.editorials.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: chapter.editorials.map((editorial) => 
+                _buildEditorialButton(chapter, editorial)
+              ).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditorialButton(ChapterEntity chapter, EditorialEntity editorial) {
+    return InkWell(
+      onTap: () => _onChapterTap(chapter, editorial),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: DraculaTheme.purple,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              editorial.editorialName,
+              style: const TextStyle(
+                color: DraculaTheme.background,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.open_in_new,
+              size: 14,
+              color: DraculaTheme.background,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
