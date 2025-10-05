@@ -4,7 +4,8 @@ import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/application/services/mangadx_service.dart';
 import 'package:mangari/core/di/service_locator.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'dart:convert';
 
 class MangaReaderView extends StatefulWidget {
   final ChapterViewEntity chapter;
@@ -26,24 +27,55 @@ class MangaReaderView extends StatefulWidget {
 
 class _MangaReaderViewState extends State<MangaReaderView> {
   final MangaDxService _mangaService = getIt<MangaDxService>();
-  final PageController _pageController = PageController();
   
   List<String> _images = [];
   bool _isLoading = true;
   String? _errorMessage;
   int _currentPage = 0;
   bool _showControls = true;
+  
+  late WebViewController _webViewController;
 
   @override
   void initState() {
     super.initState();
+    _initializeWebView();
     _loadChapterImages();
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
+  void _initializeWebView() {
+    _webViewController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..enableZoom(true)  // Habilitar zoom nativo
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (String url) {
+            // WebView está listo
+          },
+        ),
+      )
+      ..addJavaScriptChannel(
+        'PageTracker',
+        onMessageReceived: (JavaScriptMessage message) {
+          final pageData = jsonDecode(message.message);
+          setState(() {
+            _currentPage = pageData['currentPage'] ?? 0;
+          });
+        },
+      )
+      ..addJavaScriptChannel(
+        'ToggleControls',
+        onMessageReceived: (JavaScriptMessage message) {
+          _toggleControls();
+        },
+      )
+      ..addJavaScriptChannel(
+        'Console',
+        onMessageReceived: (JavaScriptMessage message) {
+          print('WebView Console: ${message.message}');
+        },
+      );
   }
 
   Future<void> _loadChapterImages() async {
@@ -59,6 +91,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         _images = images;
         _isLoading = false;
       });
+
+      // Cargar contenido HTML tan pronto como tengamos las imágenes
+      if (_images.isNotEmpty) {
+        _loadHtmlContent();
+      }
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
@@ -71,6 +108,194 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     setState(() {
       _showControls = !_showControls;
     });
+  }
+
+  void _loadHtmlContent() {
+    final htmlContent = _generateHtmlContent();
+    print('Loading HTML content with ${_images.length} images');
+    _webViewController.loadHtmlString(htmlContent, baseUrl: 'https://mangadex.org/');
+  }
+
+  String _generateHtmlContent() {
+    final imageElements = _images.asMap().entries.map((entry) {
+      final index = entry.key;
+      final imageUrl = entry.value;
+      return '''
+      <div class="image-container" data-index="$index">
+        <img src="$imageUrl" alt="Manga page $index" class="manga-image" 
+             onerror="this.style.display='none'; this.parentElement.querySelector('.loading-overlay').innerHTML='Error cargando imagen ${index + 1}'; this.parentElement.querySelector('.loading-overlay').style.color='red';"
+             onload="console.log('Imagen ${index + 1} cargada correctamente'); this.parentElement.querySelector('.loading-overlay').style.display='none';" />
+        <div class="loading-overlay">Cargando imagen ${index + 1}...</div>
+      </div>
+    ''';
+    }).join('\n');
+
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          background-color: black;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          min-height: 100vh;
+          overflow-x: hidden;
+          touch-action: manipulation;
+        }
+        
+        .image-container {
+          width: 100%;
+          display: flex;
+          justify-content: center;
+          margin-bottom: 2px;
+          position: relative;
+          min-height: 200px;
+        }
+        
+        .manga-image {
+          max-width: 100%;
+          height: auto;
+          display: block;
+          image-rendering: -webkit-optimize-contrast;
+          image-rendering: crisp-edges;
+        }
+        
+        .loading-overlay {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          color: #bd93f9;
+          background: rgba(0, 0, 0, 0.8);
+          padding: 10px 20px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          display: block;
+        }
+        
+        .image-loaded .loading-overlay {
+          display: none;
+        }
+        
+        .loading {
+          color: white;
+          text-align: center;
+          padding: 20px;
+          font-family: Arial, sans-serif;
+        }
+        
+        .error {
+          color: #ff5555;
+          text-align: center;
+          padding: 20px;
+          font-family: Arial, sans-serif;
+        }
+      </style>
+    </head>
+    <body>
+      $imageElements
+      
+      <script>
+        let currentPage = 0;
+        
+        // Tracking de páginas
+        function updateCurrentPage() {
+          const images = document.querySelectorAll('.image-container');
+          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+          const windowHeight = window.innerHeight;
+          
+          for (let i = 0; i < images.length; i++) {
+            const rect = images[i].getBoundingClientRect();
+            const imageTop = rect.top + scrollTop;
+            const imageBottom = imageTop + rect.height;
+            
+            if (imageTop <= scrollTop + windowHeight / 2 && imageBottom >= scrollTop + windowHeight / 2) {
+              if (currentPage !== i) {
+                currentPage = i;
+                if (window.PageTracker) {
+                  window.PageTracker.postMessage(JSON.stringify({
+                    currentPage: currentPage,
+                    totalPages: images.length
+                  }));
+                }
+              }
+              break;
+            }
+          }
+        }
+        
+        // Event listeners
+        window.addEventListener('scroll', updateCurrentPage);
+        window.addEventListener('resize', updateCurrentPage);
+        
+        // Toggle controls on tap
+        document.addEventListener('click', function(e) {
+          if (window.ToggleControls) {
+            window.ToggleControls.postMessage('toggle');
+          }
+        });
+        
+        // Prevent context menu
+        document.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+        });
+        
+        // Initialize
+        setTimeout(updateCurrentPage, 100);
+        
+        // Manejo de errores de imágenes
+        document.querySelectorAll('.manga-image').forEach((img, index) => {
+          const container = img.parentElement;
+          
+          img.addEventListener('load', function() {
+            console.log('Image loaded:', index);
+            container.classList.add('image-loaded');
+            updateCurrentPage();
+          });
+          
+          img.addEventListener('error', function() {
+            console.log('Image error:', index);
+            container.innerHTML = '<div class="error">Error al cargar imagen ' + (index + 1) + '</div>';
+          });
+          
+          // Configurar headers manualmente usando fetch si es necesario
+          if (img.src.includes('mangadex.org')) {
+            // Para MangaDX, intentar cargar con fetch primero
+            fetch(img.src, {
+              method: 'GET',
+              headers: {
+                'Referer': 'https://mangadex.org/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            }).then(response => {
+              if (response.ok) {
+                return response.blob();
+              }
+              throw new Error('Network response was not ok');
+            }).then(blob => {
+              const objectURL = URL.createObjectURL(blob);
+              img.src = objectURL;
+            }).catch(error => {
+              console.error('Error loading image:', error);
+              img.style.display = 'none';
+              container.innerHTML = '<div class="error">Error al cargar imagen ' + (index + 1) + '</div>';
+            });
+          }
+        });
+      </script>
+    </body>
+    </html>
+    ''';
   }
 
   @override
@@ -122,7 +347,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             ),
         ],
       ) : null,
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+        ],
+      ),
     );
   }
 
@@ -201,70 +430,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       );
     }
 
-    return GestureDetector(
-      onTap: _toggleControls,
-      child: PageView.builder(
-        controller: _pageController,
-        itemCount: _images.length,
-        itemBuilder: (context, index) => _buildImagePage(_images[index]),
-        onPageChanged: (index) {
-          setState(() {
-            _currentPage = index;
-          });
-        },
-      ),
-    );
-  }
-
-  Widget _buildImagePage(String imageUrl) {
-    return Center(
-      child: InteractiveViewer(
-        maxScale: 3.0,
-        minScale: 0.5,
-        child: CachedNetworkImage(
-          imageUrl: imageUrl,
-          httpHeaders: {
-            'Referer': 'https://mangadex.org/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          fit: BoxFit.contain,
-          width: double.infinity,
-          height: double.infinity,
-          placeholder: (context, url) => Container(
-            color: Colors.black,
-            child: const Center(
-              child: CircularProgressIndicator(
-                color: DraculaTheme.purple,
-                strokeWidth: 2,
-              ),
-            ),
-          ),
-          errorWidget: (context, url, error) => Container(
-            color: Colors.black,
-            child: const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.broken_image,
-                    color: DraculaTheme.red,
-                    size: 64,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'Error al cargar imagen',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          fadeInDuration: const Duration(milliseconds: 200),
-        ),
-      ),
-    );
+    // WebView con el contenido HTML
+    return WebViewWidget(controller: _webViewController);
   }
 }
