@@ -1,17 +1,17 @@
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
-import 'package:mangari/domain/interfaces/manga_interfaces.dart';
+import 'package:mangari/application/services/mangadx_service.dart';
 
 /// Repositorio de Servidores que implementa IServersRepositoryV2  
-/// Maneja únicamente MangaDex como servidor activo usando el repositorio de manga
+/// Maneja únicamente MangaDX como servidor activo usando el servicio de application
 class ServersRepositoryV2 implements IServersRepositoryV2 {
-  final IMangaRepository _mangaRepository;
+  final MangaDxService _mangaDxService;
   late final List<ServerEntity> _servers;
 
   ServersRepositoryV2({
-    required IMangaRepository mangaRepository,
-  }) : _mangaRepository = mangaRepository {
+    required MangaDxService mangaDxService,
+  }) : _mangaDxService = mangaDxService {
     
     // Inicializar los servidores con MangaDeX como único servidor activo
     _servers = [
@@ -21,8 +21,8 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         iconUrl: 'https://mangadex.dev/content/images/2021/08/icon.png',
         language: 'Es',
         baseUrl: 'https://api.mangadex.org',
-        isActive: true,
-        serviceName: 'MangaDex',
+        isActive: _mangaDxService.isActive,
+        serviceName: _mangaDxService.serverName,
       ),
     ];
   }
@@ -104,5 +104,23 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
     allManga.sort((a, b) => a.title.compareTo(b.title));
     
     return allManga;
+  }
+
+  /// Obtiene las imágenes de un capítulo desde el servicio MangaDX
+  Future<List<String>> getChapterImagesFromServer(String serverId, String chapterId) async {
+    try {
+      if (serverId != 'mangadx') {
+        throw Exception('Servidor no soportado: $serverId');
+      }
+
+      final server = await getServerById(serverId);
+      if (server == null || !server.isActive) {
+        throw Exception('El servidor $serverId no está disponible');
+      }
+
+      return await _mangaDxService.getChapterImagesById(chapterId);
+    } catch (e) {
+      throw Exception('Error al obtener imágenes del capítulo: $e');
+    }
   }
 }

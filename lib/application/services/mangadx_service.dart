@@ -10,6 +10,10 @@ class MangaDxService implements IMangaService {
 
   MangaDxService(this._repository);
 
+  // Propiedades para compatibilidad con IServersRepositoryV2
+  String get serverName => 'MangaDx';
+  bool get isActive => true;
+
   @override
   Future<List<MangaDetailEntity>> getManga(int page) async {
     try {
@@ -446,6 +450,28 @@ class MangaDxService implements IMangaService {
       return images;
     } catch (e) {
       throw Exception('Error en MangaDexService getChapterImages: $e');
+    }
+  }
+
+  /// Método para obtener imágenes de capítulo usando ID de capítulo (String)
+  /// Compatible con la interfaz IServersRepositoryV2
+  Future<List<String>> getChapterImagesById(String chapterId) async {
+    try {
+      final response = await _repository.getChapterDetail(chapterId);
+      
+      final chapterHash = response['chapter']['hash'] as String;
+      final chapterBaseUrl = response['baseUrl'] as String;
+      final chapterImages = response['chapter']['data'] as List<dynamic>;
+      
+      final images = <String>[];
+      for (final image in chapterImages) {
+        final imageUrl = '$chapterBaseUrl/data/$chapterHash/$image';
+        images.add(imageUrl);
+      }
+      
+      return images;
+    } catch (e) {
+      throw Exception('Error al obtener imágenes del capítulo por ID: $e');
     }
   }
 }

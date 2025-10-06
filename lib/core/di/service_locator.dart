@@ -31,7 +31,7 @@ void setupDependencies() {
   // Repositorio V2 que maneja servidores
   getIt.registerLazySingleton<IServersRepositoryV2>(
     () => ServersRepositoryV2(
-      mangaRepository: getIt<IMangaRepository>(),
+      mangaDxService: getIt<MangaDxService>(),
     ),
   );
 
