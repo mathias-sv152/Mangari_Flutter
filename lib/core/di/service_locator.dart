@@ -6,7 +6,6 @@ import 'package:mangari/domain/interfaces/manga_interfaces.dart';
 import 'package:mangari/infrastructure/client/api_client.dart';
 import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
 import 'package:mangari/infrastructure/repositories/mangadx_repository.dart';
-import 'package:mangari/infrastructure/services/mangadx_service.dart' as infra_manga_dx;
 
 /// Service Locator para la inyección de dependencias
 /// Utilizamos GetIt como contenedor de IoC
@@ -24,11 +23,6 @@ void setupDependencies() {
     () => MangaDxRepository(getIt<ApiClient>()),
   );
 
-  // Servicio de MangaDx de infraestructura
-  getIt.registerLazySingleton<infra_manga_dx.MangaDxService>(
-    () => infra_manga_dx.MangaDxService(apiClient: getIt<ApiClient>()),
-  );
-
   // Servicio de MangaDx de aplicación
   getIt.registerLazySingleton<MangaDxService>(
     () => MangaDxService(getIt<IMangaRepository>()),
@@ -37,7 +31,7 @@ void setupDependencies() {
   // Repositorio V2 que maneja servidores
   getIt.registerLazySingleton<IServersRepositoryV2>(
     () => ServersRepositoryV2(
-      mangaDexService: getIt<infra_manga_dx.MangaDxService>(),
+      mangaRepository: getIt<IMangaRepository>(),
     ),
   );
 
