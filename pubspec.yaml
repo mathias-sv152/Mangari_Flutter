@@ -58,6 +58,9 @@ dependencies:
   
   # WebView for advanced image display
   webview_flutter: ^4.4.2
+  
+  # HTML parser for TMO service
+  html: ^0.15.4
 
 dev_dependencies:
   flutter_test:

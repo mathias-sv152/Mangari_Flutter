@@ -320,22 +320,25 @@ class MangaInfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Título optimizado
-          Text(
-            manga.title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: DraculaTheme.foreground,
-              height: 1.2,
+          Flexible(
+            child: Text(
+              manga.title,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: DraculaTheme.foreground,
+                height: 1.2,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 6),
           
@@ -369,20 +372,26 @@ class _OptimizedTagRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _OptimizedTag(
-          text: manga.bookType,
-          color: DraculaTheme.purple,
+    return SizedBox(
+      height: 21, // Altura fija para evitar overflow
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _OptimizedTag(
+              text: manga.bookType,
+              color: DraculaTheme.purple,
+            ),
+            if (manga.demography != 'N/A') ...[
+              const SizedBox(width: 6),
+              _OptimizedTag(
+                text: manga.demography,
+                color: DraculaTheme.cyan,
+              ),
+            ],
+          ],
         ),
-        if (manga.demography != 'N/A') ...[
-          const SizedBox(width: 6),
-          _OptimizedTag(
-            text: manga.demography,
-            color: DraculaTheme.cyan,
-          ),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -405,10 +414,10 @@ class _OptimizedTag extends StatelessWidget {
         vertical: 3,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: color.withOpacity(0.3),
+          color: color.withValues(alpha: 0.3),
           width: 0.5,
         ),
       ),
@@ -419,6 +428,8 @@ class _OptimizedTag extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w600,
         ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -437,7 +448,7 @@ class _LoadingCard extends StatelessWidget {
       ),
       child: Container(
         decoration: BoxDecoration(
-          color: DraculaTheme.currentLine.withOpacity(0.5),
+          color: DraculaTheme.currentLine.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Center(

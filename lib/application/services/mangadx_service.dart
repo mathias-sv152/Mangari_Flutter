@@ -45,9 +45,10 @@ class MangaDxService implements IMangaService {
         final link = 'https://mangadex.org/title/${item['id']}';
 
         // Determinar el tipo de libro
-        final bookType = _extractBookType(
-          item['attributes']['tags'] as List<dynamic>?,
-        );
+        // final bookType = _extractBookType(
+        //   item['attributes']['tags'] as List<dynamic>?,
+        // );
+        final bookType = item['type'] as String?;
 
         // Extraer demografía
         final demography = 
@@ -58,7 +59,7 @@ class MangaDxService implements IMangaService {
           title: title,
           linkImage: linkImage,
           link: link,
-          bookType: bookType,
+          bookType: bookType ?? 'Manga',
           demography: demography,
           id: item['id'] as String,
           service: 'mangadex',

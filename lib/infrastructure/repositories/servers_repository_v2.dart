@@ -1,28 +1,48 @@
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
-import 'package:mangari/application/services/mangadx_service.dart';
+import 'package:mangari/domain/interfaces/i_manga_service.dart';
+import 'package:mangari/infrastructure/services/tmo_service.dart';
 
 /// Repositorio de Servidores que implementa IServersRepositoryV2  
 /// Maneja únicamente MangaDX como servidor activo usando el servicio de application
 class ServersRepositoryV2 implements IServersRepositoryV2 {
-  final MangaDxService _mangaDxService;
+  final IMangaService _mangaDxService;
+  final TmoService _tmoService;
   late final List<ServerEntity> _servers;
+  late final Map<String, IMangaService> _serviceMap;
 
   ServersRepositoryV2({
-    required MangaDxService mangaDxService,
-  }) : _mangaDxService = mangaDxService {
+    required IMangaService mangaDxService,
+    required TmoService tmoService,
+  }) : _mangaDxService = mangaDxService,
+       _tmoService = tmoService {
     
-    // Inicializar los servidores con MangaDeX como único servidor activo
+    // Inicializar el mapa de servicios
+    _serviceMap = {
+      'mangadex': _mangaDxService,  // Cambiar de 'mangadx' a 'mangadex' para consistencia
+      'tmo': _tmoService,
+    };
+
+    // Inicializar los servidores con MangaDx y TMO
     _servers = [
       ServerEntity(
-        id: 'mangadex',
+        id: 'mangadex',  // Cambiar de 'mangadx' a 'mangadex' para consistencia
         name: 'MangaDex',
         iconUrl: 'https://mangadex.dev/content/images/2021/08/icon.png',
         language: 'Es',
         baseUrl: 'https://api.mangadex.org',
         isActive: _mangaDxService.isActive,
         serviceName: _mangaDxService.serverName,
+      ),
+      ServerEntity(
+        id: 'tmo',
+        name: 'TuMangaOnline',
+        iconUrl: 'https://zonatmo.com/logo.png',
+        language: 'Es',
+        baseUrl: 'https://zonatmo.com',
+        isActive: _tmoService.isActive,
+        serviceName: _tmoService.serverName,
       ),
     ];
   }
@@ -49,7 +69,8 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   @override
   Future<List<MangaEntity>> getMangaFromServer(String serverId, {int page = 1}) async {
     try {
-      if (serverId != 'mangadex') {
+      final service = _serviceMap[serverId];
+      if (service == null) {
         throw Exception('Servidor no soportado: $serverId');
       }
 
@@ -58,9 +79,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         throw Exception('El servidor $serverId no está disponible');
       }
 
-      // Por ahora retornar una lista vacía
-      // TODO: Implementar conversión desde el repositorio de manga
-      return [];
+      return await service.getAllMangas(page: page, limit: 20);
     } catch (e) {
       throw Exception('Error al obtener manga del servidor $serverId: $e');
     }
@@ -69,7 +88,8 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   @override
   Future<List<MangaEntity>> searchMangaInServer(String serverId, String query, {int page = 1}) async {
     try {
-      if (serverId != 'mangadex') {
+      final service = _serviceMap[serverId];
+      if (service == null) {
         throw Exception('Servidor no soportado: $serverId');
       }
 
@@ -78,8 +98,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         throw Exception('El servidor $serverId no está disponible');
       }
 
-      // Por ahora, devolver el mismo resultado que getMangaFromServer
-      return await getMangaFromServer(serverId, page: page);
+      return await service.searchManga(query, page: page);
     } catch (e) {
       throw Exception('Error al buscar manga en el servidor $serverId: $e');
     }
@@ -106,10 +125,11 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
     return allManga;
   }
 
-  /// Obtiene las imágenes de un capítulo desde el servicio MangaDX
+  /// Obtiene las imágenes de un capítulo desde el servicio correspondiente
   Future<List<String>> getChapterImagesFromServer(String serverId, String chapterId) async {
     try {
-      if (serverId != 'mangadx') {
+      final service = _serviceMap[serverId];
+      if (service == null) {
         throw Exception('Servidor no soportado: $serverId');
       }
 
@@ -118,7 +138,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         throw Exception('El servidor $serverId no está disponible');
       }
 
-      return await _mangaDxService.getChapterImagesById(chapterId);
+      return await service.getChapterImages(chapterId);
     } catch (e) {
       throw Exception('Error al obtener imágenes del capítulo: $e');
     }

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
+import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/entities/manga_detail_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
-import 'package:mangari/application/services/mangadx_service.dart';
+import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:mangari/application/components/optimized_manga_grid.dart';
 import 'package:mangari/application/views/manga_detail_view.dart';
@@ -20,10 +21,10 @@ class MangaListView extends StatefulWidget {
 }
 
 class _MangaListViewState extends State<MangaListView> {
-  final MangaDxService _mangaService = getIt<MangaDxService>();
+  final ServersServiceV2 _serversService = getIt<ServersServiceV2>();
   final ScrollController _scrollController = ScrollController();
   
-  List<MangaDetailEntity> _mangas = [];
+  List<MangaEntity> _mangas = [];
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _hasMorePages = true;
@@ -60,12 +61,12 @@ class _MangaListViewState extends State<MangaListView> {
     });
 
     try {
-      final mangas = await _mangaService.getManga(_currentPage);
+      final mangas = await _serversService.getMangaFromServer(widget.server.id, page: _currentPage);
       
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        _hasMorePages = mangas.length >= 32; // MangaDx returns 32 per page
+        _hasMorePages = mangas.length >= 20; // Ajustado a 20 por página
       });
     } catch (e) {
       setState(() {
@@ -83,13 +84,13 @@ class _MangaListViewState extends State<MangaListView> {
     });
 
     try {
-      final newMangas = await _mangaService.getManga(_currentPage + 1);
+      final newMangas = await _serversService.getMangaFromServer(widget.server.id, page: _currentPage + 1);
       
       setState(() {
         _mangas.addAll(newMangas);
         _currentPage++;
         _isLoadingMore = false;
-        _hasMorePages = newMangas.length >= 32;
+        _hasMorePages = newMangas.length >= 20;
       });
     } catch (e) {
       setState(() {
@@ -105,6 +106,25 @@ class _MangaListViewState extends State<MangaListView> {
         );
       }
     }
+  }
+
+  // Método para convertir MangaEntity a MangaDetailEntity
+  MangaDetailEntity _convertToMangaDetail(MangaEntity entity) {
+    return MangaDetailEntity(
+      title: entity.title,
+      linkImage: entity.coverImageUrl ?? '',
+      link: entity.id,
+      bookType: entity.genres.isNotEmpty ? entity.genres.first : '',
+      demography: entity.status,
+      id: entity.id,
+      service: entity.serverSource,
+      description: entity.description ?? '',
+      genres: [],
+      chapters: [],
+      author: entity.authors.isNotEmpty ? entity.authors.first : '',
+      status: entity.status,
+      source: entity.serverSource,
+    );
   }
 
   @override
@@ -214,7 +234,7 @@ class _MangaListViewState extends State<MangaListView> {
 
     // Usar el grid optimizado
     return OptimizedMangaGrid(
-      mangas: _mangas,
+      mangas: _mangas.map((entity) => _convertToMangaDetail(entity)).toList(),
       scrollController: _scrollController,
       isLoadingMore: _isLoadingMore,
       onMangaTap: (manga) {
