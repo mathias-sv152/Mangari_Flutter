@@ -11,7 +11,7 @@ import 'package:mangari/infrastructure/client/api_client.dart';
 import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
 import 'package:mangari/infrastructure/repositories/mangadx_repository.dart';
 import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
-import 'package:mangari/infrastructure/services/tmo_service.dart';
+import 'package:mangari/application/services/tmo_service.dart';
 
 /// Service Locator para la inyección de dependencias
 /// Utilizamos GetIt como contenedor de IoC

@@ -2,7 +2,7 @@ import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/domain/interfaces/i_manga_service.dart';
-import 'package:mangari/infrastructure/services/tmo_service.dart';
+import 'package:mangari/application/services/tmo_service.dart';
 
 /// Repositorio de Servidores que implementa IServersRepositoryV2  
 /// Maneja únicamente MangaDX como servidor activo usando el servicio de application

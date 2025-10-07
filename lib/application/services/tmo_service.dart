@@ -3,7 +3,7 @@ import 'package:html/dom.dart' as dom;
 import '../../domain/entities/manga_entity.dart';
 import '../../domain/interfaces/i_manga_service.dart';
 import '../../domain/interfaces/i_tmo_repository.dart';
-import '../utils/html_utils.dart';
+import '../../infrastructure/utils/html_utils.dart';
 
 /// Servicio TMO que implementa IMangaService
 /// Maneja las peticiones específicas a zonatmo.com
