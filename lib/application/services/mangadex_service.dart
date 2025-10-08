@@ -214,7 +214,7 @@ class MangaDexService implements IMangaService {
         final coverArtMap = coverArt as Map<String, dynamic>;
         final fileName = coverArtMap['attributes']?['fileName'] as String?;
         if (fileName != null) {
-          return 'https://uploads.MangaDex.org/covers/${item['id']}/$fileName.256.jpg';
+          return 'https://uploads.mangadex.org/covers/${item['id']}/$fileName.256.jpg';
         }
       }
 
