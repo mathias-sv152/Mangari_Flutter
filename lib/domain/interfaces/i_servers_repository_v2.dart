@@ -6,18 +6,15 @@ abstract class IServersRepositoryV2 {
   /// Obtiene todos los servidores disponibles
   Future<List<ServerEntity>> getServers();
   
-  /// Obtiene un servidor por su ID
-  Future<ServerEntity?> getServerById(String serverId);
+  /// Obtiene mangas de un servidor específico
+  Future<List<MangaEntity>> getMangasFromServer(String serverId, {int page = 1, int limit = 20});
   
-  /// Obtiene servidores activos
-  Future<List<ServerEntity>> getActiveServers();
+  /// Obtiene el detalle de un manga específico de un servidor
+  Future<MangaEntity> getMangaDetailFromServer(String serverId, String mangaId);
   
-  /// Obtiene manga de un servidor específico
-  Future<List<MangaEntity>> getMangaFromServer(String serverId, {int page = 1});
+  /// Obtiene las imágenes de un capítulo de un servidor específico
+  Future<List<String>> getChapterImagesFromServer(String serverId, String chapterId);
   
-  /// Busca manga en un servidor específico
+  /// Busca mangas en un servidor específico
   Future<List<MangaEntity>> searchMangaInServer(String serverId, String query, {int page = 1});
-  
-  /// Obtiene manga de todos los servidores activos
-  Future<List<MangaEntity>> getAllMangaFromActiveServers({int page = 1});
 }

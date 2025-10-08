@@ -4,6 +4,8 @@ import 'package:mangari/application/views/main_navigation_view.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 
 void main() {
+  print('🚀 Iniciando aplicación...');
+  
   // Inicializa las dependencias antes de ejecutar la app
   setupDependencies();
   

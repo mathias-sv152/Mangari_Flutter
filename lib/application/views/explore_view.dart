@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:mangari/application/services/manga_servers_service.dart';
+import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
-import 'package:mangari/domain/entities/manga_server_entity.dart';
+import 'package:mangari/domain/entities/server_entity_v2.dart';
+import 'package:mangari/application/views/manga_list_view.dart';
 
 /// Vista de Exploración - Lista todos los servidores de manga disponibles
 class ExploreView extends StatefulWidget {
@@ -13,9 +14,9 @@ class ExploreView extends StatefulWidget {
 }
 
 class _ExploreViewState extends State<ExploreView> {
-  final MangaServersService _mangaServersService = getIt<MangaServersService>();
+  ServersServiceV2? _serversService;
   
-  List<MangaServerEntity> _mangaServers = [];
+  List<ServerEntity> _servers = [];
   bool _isLoading = false;
   String? _errorMessage;
   final TextEditingController _searchController = TextEditingController();
@@ -23,7 +24,63 @@ class _ExploreViewState extends State<ExploreView> {
   @override
   void initState() {
     super.initState();
-    _loadMangaServers();
+    // Posponer la inicialización hasta después del primer frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeService();
+    });
+  }
+
+  void _initializeService() async {
+    try {
+      print('🔍 ExploreView: Esperando un momento antes de inicializar...');
+      // Pequeño delay para asegurar que todas las dependencias estén listas
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      print('🔍 ExploreView: Intentando obtener ServersServiceV2...');
+      print('🔍 ExploreView: GetIt instance hashCode: ${getIt.hashCode}');
+      
+      // Intentar ambos métodos
+      print('🔍 ExploreView: Método 1 - Helper seguro...');
+      _serversService = getServersServiceSafely();
+      
+      if (_serversService == null) {
+        print('🔍 ExploreView: Método 2 - Acceso directo...');
+        try {
+          _serversService = getIt.get<ServersServiceV2>();
+          print('✅ ExploreView: Método directo funcionó!');
+        } catch (e) {
+          print('❌ ExploreView: Método directo falló: $e');
+          
+          print('🔍 ExploreView: Método 3 - isRegistered + get...');
+          if (getIt.isRegistered<ServersServiceV2>()) {
+            print('✓ ExploreView: Está registrado, intentando get...');
+            _serversService = getIt.get<ServersServiceV2>();
+            print('✅ ExploreView: Método 3 funcionó!');
+          } else {
+            print('❌ ExploreView: No está registrado en método 3');
+          }
+        }
+      }
+      
+      if (_serversService != null) {
+        print('✅ ExploreView: ServersServiceV2 obtenido correctamente');
+        await _loadMangaServers();
+      } else {
+        print('❌ ExploreView: No se pudo obtener ServersServiceV2 con ningún método');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'No se pudo inicializar el servicio de servidores';
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ ExploreView: Error en _initializeService: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error inicializando servicios: $e';
+        });
+      }
+    }
   }
 
   @override
@@ -33,19 +90,23 @@ class _ExploreViewState extends State<ExploreView> {
   }
 
   Future<void> _loadMangaServers() async {
+    if (!mounted || _serversService == null) return;
+    
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      final servers = await _mangaServersService.getAllMangaServers();
+      final servers = await _serversService!.getAllServers();
       
+      if (!mounted) return;
       setState(() {
-        _mangaServers = servers;
+        _servers = servers;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
@@ -54,6 +115,8 @@ class _ExploreViewState extends State<ExploreView> {
   }
 
   Future<void> _searchMangaServers(String query) async {
+    if (_serversService == null) return;
+    
     if (query.isEmpty) {
       _loadMangaServers();
       return;
@@ -65,10 +128,14 @@ class _ExploreViewState extends State<ExploreView> {
     });
 
     try {
-      final servers = await _mangaServersService.searchMangaServers(query);
+      // Por ahora simplemente filtrar de la lista cargada
+      final allServers = await _serversService!.getAllServers();
+      final filteredServers = allServers.where((server) => 
+        server.name.toLowerCase().contains(query.toLowerCase())
+      ).toList();
       
       setState(() {
-        _mangaServers = servers;
+        _servers = filteredServers;
         _isLoading = false;
       });
     } catch (e) {
@@ -172,7 +239,7 @@ class _ExploreViewState extends State<ExploreView> {
       );
     }
 
-    if (_mangaServers.isEmpty) {
+    if (_servers.isEmpty) {
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -201,151 +268,127 @@ class _ExploreViewState extends State<ExploreView> {
       backgroundColor: DraculaTheme.currentLine,
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: _mangaServers.length,
+        itemCount: _servers.length,
         itemBuilder: (context, index) {
-          final server = _mangaServers[index];
+          final server = _servers[index];
           return _buildMangaServerCard(server);
         },
       ),
     );
   }
 
-  Widget _buildMangaServerCard(MangaServerEntity server) {
+  Widget _buildMangaServerCard(ServerEntity server) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: DraculaTheme.purple.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.web,
-                    color: DraculaTheme.purple,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              server.name,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: DraculaTheme.foreground,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: server.isActive 
-                                  ? DraculaTheme.green.withOpacity(0.2)
-                                  : DraculaTheme.red.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              server.isActive ? 'ACTIVO' : 'INACTIVO',
-                              style: TextStyle(
-                                color: server.isActive 
-                                    ? DraculaTheme.green 
-                                    : DraculaTheme.red,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        server.url,
-                        style: const TextStyle(
-                          color: DraculaTheme.cyan,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      child: InkWell(
+        onTap: () {
+          // Navegar al listado de mangas de este servidor
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => MangaListView(server: server),
             ),
-            const SizedBox(height: 12),
-            Text(
-              server.description,
-              style: const TextStyle(
-                color: DraculaTheme.foreground,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _buildInfoChip(
-                  Icons.library_books,
-                  '${server.mangaCount.toString()} manga',
-                  DraculaTheme.orange,
-                ),
-                const SizedBox(width: 8),
-                _buildInfoChip(
-                  Icons.language,
-                  '${server.supportedLanguages.length} idiomas',
-                  DraculaTheme.cyan,
-                ),
-              ],
-            ),
-            if (server.supportedLanguages.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 4,
-                children: server.supportedLanguages.take(5).map((lang) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: DraculaTheme.purple.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      lang.toUpperCase(),
-                      style: const TextStyle(
-                        color: DraculaTheme.purple,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: const Icon(
+                      Icons.web,
+                      color: DraculaTheme.purple,
+                      size: 24,
                     ),
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                server.name,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: DraculaTheme.foreground,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: server.isActive 
+                                    ? DraculaTheme.green.withOpacity(0.2)
+                                    : DraculaTheme.red.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                server.isActive ? 'ACTIVO' : 'INACTIVO',
+                                style: TextStyle(
+                                  color: server.isActive 
+                                      ? DraculaTheme.green 
+                                      : DraculaTheme.red,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          server.baseUrl,
+                          style: const TextStyle(
+                            color: DraculaTheme.cyan,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Servidor de manga ${server.serviceName ?? server.name}',
+                style: const TextStyle(
+                  color: DraculaTheme.foreground,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildInfoChip(
+                    Icons.language,
+                    server.language,
+                    DraculaTheme.cyan,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildInfoChip(
+                    Icons.source,
+                    server.serviceName ?? 'Servicio',
+                    DraculaTheme.orange,
+                  ),
+                ],
               ),
             ],
-            const SizedBox(height: 8),
-            Text(
-              'Actualizado: ${_formatDate(server.lastUpdated)}',
-              style: const TextStyle(
-                color: DraculaTheme.comment,
-                fontSize: 12,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -376,16 +419,4 @@ class _ExploreViewState extends State<ExploreView> {
     );
   }
 
-  String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    final difference = now.difference(date);
-
-    if (difference.inMinutes < 60) {
-      return 'hace ${difference.inMinutes} min';
-    } else if (difference.inHours < 24) {
-      return 'hace ${difference.inHours} h';
-    } else {
-      return 'hace ${difference.inDays} días';
-    }
-  }
 }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
-import 'package:mangari/application/services/mangadx_service.dart';
+import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'dart:convert';
@@ -26,7 +26,7 @@ class MangaReaderView extends StatefulWidget {
 }
 
 class _MangaReaderViewState extends State<MangaReaderView> {
-  final MangaDxService _mangaService = getIt<MangaDxService>();
+  ServersServiceV2? _serversService;
   
   List<String> _images = [];
   bool _isLoading = true;
@@ -40,7 +40,40 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void initState() {
     super.initState();
     _initializeWebView();
-    _loadChapterImages();
+    // Posponer la inicialización hasta después del primer frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeService();
+    });
+  }
+
+  void _initializeService() async {
+    try {
+      print('🔍 MangaReaderView: Intentando obtener ServersServiceV2...');
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      _serversService = getServersServiceSafely();
+      
+      if (_serversService != null) {
+        print('✅ MangaReaderView: ServersServiceV2 obtenido correctamente');
+        await _loadChapterImages();
+      } else {
+        print('❌ MangaReaderView: No se pudo obtener ServersServiceV2');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'No se pudo inicializar el servicio de servidores';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ MangaReaderView: Error en _initializeService: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error inicializando servicios: $e';
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   void _initializeWebView() {
@@ -79,13 +112,15 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   }
 
   Future<void> _loadChapterImages() async {
+    if (_serversService == null) return;
+    
     try {
       setState(() {
         _isLoading = true;
         _errorMessage = null;
       });
 
-      final images = await _mangaService.getChapterImages(widget.chapter);
+      final images = await _serversService!.getChapterImagesFromServer(widget.server.id, widget.chapter.editorialLink);
       
       setState(() {
         _images = images;
@@ -270,7 +305,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           
           // Configurar headers manualmente usando fetch si es necesario
           if (img.src.includes('mangadex.org')) {
-            // Para MangaDX, intentar cargar con fetch primero
+            // Para MangaDex, intentar cargar con fetch primero
             fetch(img.src, {
               method: 'GET',
               headers: {

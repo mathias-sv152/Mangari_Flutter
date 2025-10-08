@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mangari/application/views/servers_list_view.dart';
+import 'package:mangari/application/views/explore_view.dart';
 import 'package:mangari/application/views/history_view.dart';
 import 'package:mangari/application/views/library_view.dart';
 import 'package:mangari/application/views/more_view.dart';
@@ -18,7 +18,7 @@ class _MainNavigationViewState extends State<MainNavigationView> {
   int _currentIndex = 0;
 
   final List<Widget> _pages = [
-    const ServersListView(), // Nueva vista simplificada
+    const ExploreView(), // Vista de exploración actualizada
     const HistoryView(),
     const LibraryView(),
     const UpdatesView(),

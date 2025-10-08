@@ -1,7 +1,7 @@
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
 import '../../domain/entities/manga_entity.dart';
-import '../../domain/interfaces/i_manga_service.dart';
+import '../interfaces/i_manga_service.dart';
 import '../../domain/interfaces/i_tmo_repository.dart';
 import '../../infrastructure/utils/html_utils.dart';
 

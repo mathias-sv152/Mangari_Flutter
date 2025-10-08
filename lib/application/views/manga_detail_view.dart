@@ -7,7 +7,7 @@ import 'package:mangari/domain/entities/chapter_entity.dart';
 import 'package:mangari/domain/entities/genre_entity.dart';
 import 'package:mangari/domain/entities/editorial_entity.dart';
 import 'package:mangari/domain/entities/chapter_view_entity.dart';
-import 'package:mangari/application/services/mangadx_service.dart';
+import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:mangari/application/views/manga_reader_view.dart';
 
@@ -26,7 +26,7 @@ class MangaDetailView extends StatefulWidget {
 }
 
 class _MangaDetailViewState extends State<MangaDetailView> {
-  final MangaDxService _mangaService = getIt<MangaDxService>();
+  ServersServiceV2? _serversService;
   
   MangaDetailEntity? _mangaDetail;
   bool _isLoading = true;
@@ -38,20 +38,80 @@ class _MangaDetailViewState extends State<MangaDetailView> {
   @override
   void initState() {
     super.initState();
-    _loadMangaDetails();
+    // Posponer la inicialización hasta después del primer frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeService();
+    });
+  }
+
+  void _initializeService() async {
+    try {
+      print('🔍 MangaDetailView: Intentando obtener ServersServiceV2...');
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      _serversService = getServersServiceSafely();
+      
+      if (_serversService != null) {
+        print('✅ MangaDetailView: ServersServiceV2 obtenido correctamente');
+        await _loadMangaDetails();
+      } else {
+        print('❌ MangaDetailView: No se pudo obtener ServersServiceV2');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'No se pudo inicializar el servicio de servidores';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ MangaDetailView: Error en _initializeService: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error inicializando servicios: $e';
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadMangaDetails() async {
+    if (_serversService == null) return;
+    
     try {
       setState(() {
         _isLoading = true;
         _errorMessage = null;
       });
 
-      final detailedManga = await _mangaService.getMangaDetail(widget.manga);
+      // Determinar el servidor basado en el service del manga
+      String serverId = widget.manga.service.toLowerCase();
+      if (serverId == 'mangadx' || serverId == 'mangadex') {
+        serverId = 'mangadx';
+      } else if (serverId == 'tmo') {
+        serverId = 'tmo';
+      }
+
+      final detailedManga = await _serversService!.getMangaDetailFromServer(serverId, widget.manga.id);
+      
+      // Convertir de vuelta a MangaDetailEntity
+      final detailedMangaEntity = MangaDetailEntity(
+        title: detailedManga.title,
+        linkImage: detailedManga.coverImageUrl ?? widget.manga.linkImage,
+        link: widget.manga.link,
+        bookType: widget.manga.bookType,
+        demography: widget.manga.demography,
+        id: detailedManga.id,
+        service: serverId,
+        description: detailedManga.description ?? widget.manga.description,
+        genres: widget.manga.genres,
+        chapters: widget.manga.chapters,
+        author: detailedManga.authors.isNotEmpty ? detailedManga.authors.first : widget.manga.author,
+        status: detailedManga.status,
+        source: detailedManga.serverSource,
+      );
       
       setState(() {
-        _mangaDetail = detailedManga;
+        _mangaDetail = detailedMangaEntity;
         _isLoading = false;
       });
     } catch (e) {

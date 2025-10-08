@@ -21,7 +21,7 @@ class MangaListView extends StatefulWidget {
 }
 
 class _MangaListViewState extends State<MangaListView> {
-  final ServersServiceV2 _serversService = getIt<ServersServiceV2>();
+  ServersServiceV2? _serversService;
   final ScrollController _scrollController = ScrollController();
   
   List<MangaEntity> _mangas = [];
@@ -34,8 +34,40 @@ class _MangaListViewState extends State<MangaListView> {
   @override
   void initState() {
     super.initState();
-    _loadMangas();
     _scrollController.addListener(_onScroll);
+    // Posponer la inicialización hasta después del primer frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeService();
+    });
+  }
+
+  void _initializeService() async {
+    try {
+      print('🔍 MangaListView: Esperando un momento antes de inicializar...');
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      print('🔍 MangaListView: Intentando obtener ServersServiceV2...');
+      _serversService = getServersServiceSafely();
+      
+      if (_serversService != null) {
+        print('✅ MangaListView: ServersServiceV2 obtenido correctamente');
+        await _loadMangas();
+      } else {
+        print('❌ MangaListView: No se pudo obtener ServersServiceV2');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'No se pudo inicializar el servicio de servidores';
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ MangaListView: Error en _initializeService: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error inicializando servicios: $e';
+        });
+      }
+    }
   }
 
   @override
@@ -54,6 +86,8 @@ class _MangaListViewState extends State<MangaListView> {
   }
 
   Future<void> _loadMangas() async {
+    if (!mounted || _serversService == null) return;
+    
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -61,7 +95,7 @@ class _MangaListViewState extends State<MangaListView> {
     });
 
     try {
-      final mangas = await _serversService.getMangaFromServer(widget.server.id, page: _currentPage);
+      final mangas = await _serversService!.getMangasFromServer(widget.server.id, page: _currentPage);
       
       setState(() {
         _mangas = mangas;
@@ -77,14 +111,14 @@ class _MangaListViewState extends State<MangaListView> {
   }
 
   Future<void> _loadMoreMangas() async {
-    if (_isLoadingMore || !_hasMorePages) return;
+    if (_isLoadingMore || !_hasMorePages || _serversService == null) return;
 
     setState(() {
       _isLoadingMore = true;
     });
 
     try {
-      final newMangas = await _serversService.getMangaFromServer(widget.server.id, page: _currentPage + 1);
+      final newMangas = await _serversService!.getMangasFromServer(widget.server.id, page: _currentPage + 1);
       
       setState(() {
         _mangas.addAll(newMangas);

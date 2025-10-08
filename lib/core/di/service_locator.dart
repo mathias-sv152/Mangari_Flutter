@@ -1,143 +1,163 @@
 import 'package:get_it/get_it.dart';
 import 'package:http/http.dart' as http;
-import 'package:mangari/application/services/servers_service_v2.dart';
-import 'package:mangari/application/services/mangadx_service.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
-import 'package:mangari/domain/interfaces/manga_interfaces.dart';
-import 'package:mangari/domain/interfaces/i_manga_service.dart' as manga_service;
+import 'package:mangari/domain/interfaces/i_mangadex_reporitory.dart';
 import 'package:mangari/domain/interfaces/i_tmo_repository.dart';
-import 'package:mangari/domain/entities/manga_entity.dart';
-import 'package:mangari/infrastructure/client/api_client.dart';
-import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
-import 'package:mangari/infrastructure/repositories/mangadx_repository.dart';
-import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
+
+import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/application/services/tmo_service.dart';
+import 'package:mangari/application/services/mangadex_service.dart';
 
-/// Service Locator para la inyección de dependencias
-/// Utilizamos GetIt como contenedor de IoC
-final getIt = GetIt.instance;
+import 'package:mangari/infrastructure/repositories/mangadex_repository.dart';
+import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
+import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
+import 'package:mangari/infrastructure/client/api_client.dart';
 
-/// Configura todas las dependencias de la aplicación
+final GetIt getIt = GetIt.instance;
+
+// Flag para evitar múltiples configuraciones
+bool _isConfigured = false;
+
+/// Configura e inicializa todas las dependencias del sistema
 void setupDependencies() {
-  // Configuración de cliente HTTP
-  getIt.registerLazySingleton<http.Client>(
-    () => http.Client(),
-  );
+  // Evitar configurar múltiples veces
+  if (_isConfigured) {
+    print('⚠️ Service Locator ya está configurado, saltando...');
+    return;
+  }
 
-  // Configuración de cliente API
-  getIt.registerLazySingleton<ApiClient>(
-    () => ApiClient(),
-  );
-
-  // Repositorio de MangaDx
-  getIt.registerLazySingleton<IMangaRepository>(
-    () => MangaDxRepository(getIt<ApiClient>()),
-  );
-
-  // Repositorio de TMO
-  getIt.registerLazySingleton<ITmoRepository>(
-    () => TmoRepository(getIt<http.Client>()),
-  );
-
-  // Servicio de MangaDx de aplicación (para compatibilidad hacia atrás)
-  getIt.registerLazySingleton<MangaDxService>(
-    () => MangaDxService(getIt<IMangaRepository>()),
-  );
-
-  // Servicio de TMO de infraestructura
-  getIt.registerLazySingleton<TmoService>(
-    () => TmoService(tmoRepository: getIt<ITmoRepository>()),
-  );
-
-  // Crear un adaptador para MangaDxService que implemente manga_service.IMangaService
-  getIt.registerLazySingleton<manga_service.IMangaService>(
-    () => _MangaDxServiceAdapter(getIt<MangaDxService>()),
-    instanceName: 'mangadex',  // Cambiar de 'mangadx' a 'mangadex' para consistencia
-  );
-
-  // Registrar TMO service como manga_service.IMangaService
-  getIt.registerLazySingleton<manga_service.IMangaService>(
-    () => getIt<TmoService>(),
-    instanceName: 'tmo',
-  );
-
-  // Repositorio V2 que maneja servidores
-  getIt.registerLazySingleton<IServersRepositoryV2>(
-    () => ServersRepositoryV2(
-      mangaDxService: getIt<manga_service.IMangaService>(instanceName: 'mangadex'),  // Cambiar de 'mangadx' a 'mangadex'
-      tmoService: getIt<TmoService>(),
-    ),
-  );
-
-  // Servicio V2 para servidores de manga
-  getIt.registerLazySingleton<ServersServiceV2>(
-    () => ServersServiceV2(
-      repository: getIt<IServersRepositoryV2>(),
-    ),
-  );
-}
-
-/// Limpia todas las dependencias registradas
-void resetDependencies() {
+  print('🔧 Iniciando configuración del Service Locator...');
+  
+  // Limpiar registros previos solo la primera vez
   getIt.reset();
+  
+  try {
+    print('🔧 Registrando clients...');
+    // ========== CLIENTS ==========
+    getIt.registerLazySingleton<http.Client>(() => http.Client());
+    getIt.registerLazySingleton<ApiClient>(
+      () => ApiClient(httpClient: getIt<http.Client>()),
+    );
+
+    print('🔧 Registrando repositories...');
+    // ========== REPOSITORIES ==========
+    getIt.registerLazySingleton<ITmoRepository>(
+      () => TmoRepository(getIt<http.Client>()),
+    );
+    getIt.registerLazySingleton<IMangaDexRepository>(
+      () => MangaDexRepository(getIt<http.Client>()),
+    );
+
+    print('🔧 Registrando services...');
+    // ========== SERVICES (Application) ==========
+    getIt.registerLazySingleton<TmoService>(
+      () => TmoService(tmoRepository: getIt<ITmoRepository>()),
+    );
+
+    getIt.registerLazySingleton<MangaDexService>(
+      () => MangaDexService(getIt<IMangaDexRepository>()),
+    );
+
+    print('🔧 Registrando repositories v2...');
+    // ========== REPOSITORIES V2 ==========
+    getIt.registerLazySingleton<IServersRepositoryV2>(
+      () => ServersRepositoryV2(
+        mangaDexService: getIt<MangaDexService>(),
+        tmoService: getIt<TmoService>(),
+      ),
+    );
+
+    print('🔧 Registrando services v2...');
+    // ========== APPLICATION SERVICES V2 ==========
+    getIt.registerLazySingleton<ServersServiceV2>(
+      () => ServersServiceV2(repository: getIt<IServersRepositoryV2>()),
+    );
+
+    print('✅ Service Locator configurado correctamente');
+    
+    // Verificar que las dependencias están registradas
+    _verifyDependencies();
+    
+    // Marcar como configurado
+    _isConfigured = true;
+    print('🔒 Service Locator marcado como configurado');
+    
+  } catch (e) {
+    print('❌ Error configurando Service Locator: $e');
+    _isConfigured = false; // Permitir reintentos en caso de error
+    rethrow;
+  }
 }
 
-/// Adaptador para MangaDxService que implementa manga_service.IMangaService
-class _MangaDxServiceAdapter implements manga_service.IMangaService {
-  final MangaDxService _mangaDxService;
+/// Verifica que todas las dependencias críticas están registradas
+void _verifyDependencies() {
+  try {
+    print('🔍 Verificando dependencias...');
+    print('🔍 Service Locator: GetIt instance hashCode: ${getIt.hashCode}');
+    
+    // Verificar clients
+    final client = getIt<http.Client>();
+    print('✓ http.Client registrado: ${client.runtimeType}');
+    
+    // Verificar repositories
+    final tmoRepo = getIt<ITmoRepository>();
+    print('✓ ITmoRepository registrado: ${tmoRepo.runtimeType}');
+    
+    final mangaDexRepo = getIt<IMangaDexRepository>();
+    print('✓ IMangaDexRepository registrado: ${mangaDexRepo.runtimeType}');
+    
+    // Verificar services
+    final tmoService = getIt<TmoService>();
+    print('✓ TmoService registrado: ${tmoService.runtimeType}');
+    
+    final mangaDexService = getIt<MangaDexService>();
+    print('✓ MangaDexService registrado: ${mangaDexService.runtimeType}');
+    
+    // Verificar repository v2
+    final serversRepo = getIt<IServersRepositoryV2>();
+    print('✓ IServersRepositoryV2 registrado: ${serversRepo.runtimeType}');
+    
+    // Verificar service v2
+    final serversService = getIt<ServersServiceV2>();
+    print('✓ ServersServiceV2 registrado: ${serversService.runtimeType}');
+    print('✓ ServersServiceV2 instance hashCode: ${serversService.hashCode}');
+    
+    print('✅ Todas las dependencias verificadas correctamente');
+  } catch (e) {
+    print('❌ Error verificando dependencias: $e');
+    rethrow;
+  }
+}
 
-  _MangaDxServiceAdapter(this._mangaDxService);
-
-  @override
-  String get serverName => 'MangaDx';
-
-  @override
-  bool get isActive => true;
-
-  @override
-  Future<List<MangaEntity>> getAllMangas({int page = 1, int limit = 20}) async {
-    try {
-      // El MangaDxService original retorna MangaDetailEntity, necesitamos convertir
-      final mangaDetails = await _mangaDxService.getManga(page);
+/// Método helper para obtener ServersServiceV2 de manera segura
+ServersServiceV2? getServersServiceSafely() {
+  try {
+    print('🔍 getServersServiceSafely: Verificando estado...');
+    print('🔍 Service Locator configurado: $_isConfigured');
+    print('🔍 getServersServiceSafely: Verificando si está registrado...');
+    
+    if (getIt.isRegistered<ServersServiceV2>()) {
+      print('✓ getServersServiceSafely: ServersServiceV2 está registrado');
+      final service = getIt.get<ServersServiceV2>();
+      print('✓ getServersServiceSafely: Servicio obtenido: ${service.runtimeType}');
+      return service;
+    } else {
+      print('❌ getServersServiceSafely: ServersServiceV2 NO está registrado');
+      print('❌ Algo borró las dependencias! Reconfigurar...');
       
-      // Convertir MangaDetailEntity a MangaEntity
-      final mangaEntities = mangaDetails.map((detail) {
-        return MangaEntity(
-          id: detail.id,
-          title: detail.title,
-          description: detail.description,
-          coverImageUrl: detail.linkImage,
-          authors: [detail.author],
-          genres: detail.genres.map((g) => g.text).toList(),
-          status: detail.status.isNotEmpty ? detail.status : detail.demography,
-          serverSource: 'mangadx',
-        );
-      }).toList();
+      // Si las dependencias se perdieron, intentar reconfigurar
+      _isConfigured = false;
+      setupDependencies();
       
-      return mangaEntities;
-    } catch (e) {
-      return [];
+      // Intentar de nuevo
+      if (getIt.isRegistered<ServersServiceV2>()) {
+        return getIt.get<ServersServiceV2>();
+      }
+      
+      return null;
     }
-  }
-
-  @override
-  Future<MangaEntity> getMangaDetail(String mangaId) async {
-    // Implementación pendiente - requiere conversión de MangaDetailEntity a MangaEntity
-    // TODO: Usar _mangaDxService.getMangaDetail() y convertir resultado
-    throw UnimplementedError('Conversión de MangaDetailEntity a MangaEntity pendiente');
-  }
-
-  @override
-  Future<List<String>> getChapterImages(String chapterId) async {
-    // Usar el método original del MangaDxService
-    // TODO: Usar _mangaDxService.getChapterImages()
-    throw UnimplementedError('Implementación pendiente');
-  }
-
-  @override
-  Future<List<MangaEntity>> searchManga(String query, {int page = 1}) async {
-    // Implementación pendiente
-    // TODO: Implementar usando _mangaDxService y convertir resultados
-    return [];
+  } catch (e) {
+    print('❌ Error obteniendo ServersServiceV2: $e');
+    return null;
   }
 }
