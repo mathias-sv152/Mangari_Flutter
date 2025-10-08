@@ -11,6 +11,7 @@ class MangaReaderView extends StatefulWidget {
   final ChapterViewEntity chapter;
   final ServerEntity server;
   final String mangaTitle;
+  final String referer;
   final VoidCallback onBack;
 
   const MangaReaderView({
@@ -18,6 +19,7 @@ class MangaReaderView extends StatefulWidget {
     required this.chapter,
     required this.server,
     required this.mangaTitle,
+    required this.referer,
     required this.onBack,
   });
 
@@ -120,6 +122,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         _errorMessage = null;
       });
 
+      print('🔍 MangaReaderView: Usando servidor ${widget.server.id} con referer ${widget.referer}');
+
       final images = await _serversService!.getChapterImagesFromServer(widget.server.id, widget.chapter.editorialLink);
       
       setState(() {
@@ -130,6 +134,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       // Cargar contenido HTML tan pronto como tengamos las imágenes
       if (_images.isNotEmpty) {
         _loadHtmlContent();
+        // Inyectar el JavaScript para interceptar las peticiones de imágenes
+        _injectImageInterceptor();
       }
     } catch (e) {
       setState(() {
@@ -137,6 +143,33 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         _isLoading = false;
       });
     }
+  }
+
+  void _injectImageInterceptor() {
+    // Inyectar JavaScript para manejar la carga de imágenes con el referer correcto
+    final script = '''
+      (function() {
+        const originalImage = window.Image;
+        window.Image = function() {
+          const img = new originalImage();
+          const originalSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+          
+          Object.defineProperty(img, 'src', {
+            get: function() {
+              return originalSrc.get.call(this);
+            },
+            set: function(value) {
+              this.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+              originalSrc.set.call(this, value);
+            }
+          });
+          
+          return img;
+        };
+      })();
+    ''';
+    
+    _webViewController.runJavaScript(script);
   }
 
   void _toggleControls() {
@@ -148,7 +181,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void _loadHtmlContent() {
     final htmlContent = _generateHtmlContent();
     print('Loading HTML content with ${_images.length} images');
-    _webViewController.loadHtmlString(htmlContent, baseUrl: 'https://mangadex.org/');
+    print('🔍 Using referer: ${widget.referer}');
+    _webViewController.loadHtmlString(htmlContent, baseUrl: widget.referer);
   }
 
   String _generateHtmlContent() {
@@ -157,9 +191,12 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       final imageUrl = entry.value;
       return '''
       <div class="image-container" data-index="$index">
-        <img src="$imageUrl" alt="Manga page $index" class="manga-image" 
-             onerror="this.style.display='none'; this.parentElement.querySelector('.loading-overlay').innerHTML='Error cargando imagen ${index + 1}'; this.parentElement.querySelector('.loading-overlay').style.color='red';"
-             onload="console.log('Imagen ${index + 1} cargada correctamente'); this.parentElement.querySelector('.loading-overlay').style.display='none';" />
+        <img src="$imageUrl" 
+             alt="Manga page $index" 
+             class="manga-image"
+             referrerpolicy="origin"
+             onerror="console.log('Image error:', $index); this.style.display='none'; this.parentElement.querySelector('.loading-overlay').innerHTML='Error cargando imagen ${index + 1}'; this.parentElement.querySelector('.loading-overlay').style.color='red';"
+             onload="console.log('Imagen ${index + 1} cargada correctamente'); this.parentElement.querySelector('.loading-overlay').style.display='none'; this.parentElement.classList.add('image-loaded');" />
         <div class="loading-overlay">Cargando imagen ${index + 1}...</div>
       </div>
     ''';
@@ -288,45 +325,14 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Initialize
         setTimeout(updateCurrentPage, 100);
         
-        // Manejo de errores de imágenes
-        document.querySelectorAll('.manga-image').forEach((img, index) => {
-          const container = img.parentElement;
-          
-          img.addEventListener('load', function() {
-            console.log('Image loaded:', index);
-            container.classList.add('image-loaded');
-            updateCurrentPage();
-          });
-          
-          img.addEventListener('error', function() {
-            console.log('Image error:', index);
-            container.innerHTML = '<div class="error">Error al cargar imagen ' + (index + 1) + '</div>';
-          });
-          
-          // Configurar headers manualmente usando fetch si es necesario
-          if (img.src.includes('mangadex.org')) {
-            // Para MangaDex, intentar cargar con fetch primero
-            fetch(img.src, {
-              method: 'GET',
-              headers: {
-                'Referer': 'https://mangadex.org/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-              }
-            }).then(response => {
-              if (response.ok) {
-                return response.blob();
-              }
-              throw new Error('Network response was not ok');
-            }).then(blob => {
-              const objectURL = URL.createObjectURL(blob);
-              img.src = objectURL;
-            }).catch(error => {
-              console.error('Error loading image:', error);
-              img.style.display = 'none';
-              container.innerHTML = '<div class="error">Error al cargar imagen ' + (index + 1) + '</div>';
-            });
-          }
-        });
+        // Las imágenes se cargan directamente con las etiquetas <img>
+        // El WebView usará automáticamente el referer del baseUrl (${widget.referer})
+        console.log('Referer configurado:', '${widget.referer}');
+        
+        // Esperar a que todas las imágenes se inicialicen
+        setTimeout(() => {
+          updateCurrentPage();
+        }, 500);
       </script>
     </body>
     </html>

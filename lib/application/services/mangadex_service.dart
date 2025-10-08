@@ -3,6 +3,8 @@ import '../../domain/interfaces/i_mangadex_reporitory.dart';
 
 import '../../domain/entities/manga_entity.dart';
 import '../../domain/entities/genre_entity.dart';
+import '../../domain/entities/chapter_entity.dart';
+import '../../domain/entities/editorial_entity.dart';
 
 /// Servicio MangaDex que implementa IMangaService
 /// Maneja las peticiones específicas a mangadex.org
@@ -39,12 +41,13 @@ class MangaDexService implements IMangaService {
     try {
       final mangaDetailResponse = await _repository.getMangaDetail(mangaId);
       final mangaChaptersResponse = await _repository.getChapters(mangaId);
-
-      return _formatMangaDetail(
+      final formatdetailmanga = _formatMangaDetail(
         mangaDetailResponse['data'] as Map<String, dynamic>,
         mangaChaptersResponse['data'] as List<dynamic>,
         mangaId,
       );
+      print(formatdetailmanga);
+      return formatdetailmanga;
     } catch (e) {
       throw Exception('Error en MangaDexService getMangaDetail: $e');
     }
@@ -104,6 +107,7 @@ class MangaDexService implements IMangaService {
           ),
           year: item['attributes']['year'] as int?,
           serverSource: 'MangaDex',
+          referer: 'https://mangadex.org',
         );
 
         mangas.add(manga);
@@ -123,6 +127,8 @@ class MangaDexService implements IMangaService {
   ) {
     try {
       final linkImage = _extractCoverImage(mangaDetailData);
+      print('🔍 MangaDex _formatMangaDetail - Manga ID: $mangaId');
+      print('🔍 MangaDex _formatMangaDetail - Link Image extraída: $linkImage');
       
       return MangaEntity(
         id: mangaId,
@@ -133,7 +139,7 @@ class MangaDexService implements IMangaService {
         description: _extractDescription(
           mangaDetailData['attributes']['description'] as Map<String, dynamic>?,
         ),
-        coverImageUrl: linkImage.isNotEmpty ? linkImage : null,
+        coverImageUrl: linkImage,
         authors: [_extractAuthor(
           mangaDetailData['relationships'] as List<dynamic>?,
         )],
@@ -145,7 +151,9 @@ class MangaDexService implements IMangaService {
         ),
         year: mangaDetailData['attributes']['year'] as int?,
         chapterCount: chaptersData.length,
+        chapters: _formatChaptersList(chaptersData),
         serverSource: 'MangaDex',
+        referer: 'https://mangadex.org',
       );
     } catch (e) {
       print('Error formateando detalles del manga: $e');
@@ -154,7 +162,151 @@ class MangaDexService implements IMangaService {
         title: 'Error al cargar',
         status: 'error',
         serverSource: 'MangaDex',
+        referer: 'https://mangadex.org',
       );
+    }
+  }
+
+  List<ChapterEntity> _formatChaptersList(List<dynamic> chaptersData) {
+    try {
+      final chapters = <ChapterEntity>[];
+
+      // Agrupar capítulos por número de capítulo
+      final chapterGroups = <String, List<Map<String, dynamic>>>{};
+
+      for (final chapterData in chaptersData) {
+        final chapterMap = chapterData as Map<String, dynamic>;
+        final attributes = chapterMap['attributes'] as Map<String, dynamic>;
+        
+        final chapterNumber = attributes['chapter'] as String? ?? '0';
+        final volume = attributes['volume'] as String? ?? '';
+
+        // Crear una clave única para el capítulo
+        final chapterKey = volume.isNotEmpty
+            ? 'Vol.$volume Ch.$chapterNumber'
+            : 'Ch.$chapterNumber';
+
+        if (!chapterGroups.containsKey(chapterKey)) {
+          chapterGroups[chapterKey] = [];
+        }
+
+        chapterGroups[chapterKey]!.add(chapterMap);
+      }
+
+      // Convertir grupos en objetos ChapterEntity
+      chapterGroups.forEach((chapterKey, chapterGroup) {
+        final firstChapter = chapterGroup[0];
+        final firstAttributes = firstChapter['attributes'] as Map<String, dynamic>;
+
+        // Crear título del capítulo
+        String chapterTitle = chapterKey;
+        final chapterTitleText = firstAttributes['title'] as String?;
+        if (chapterTitleText != null && chapterTitleText.isNotEmpty) {
+          chapterTitle += ' - $chapterTitleText';
+        }
+
+        // Crear editoriales para cada grupo de traducción
+        final editorials = <EditorialEntity>[];
+
+        for (final chapterMap in chapterGroup) {
+          final relationships = chapterMap['relationships'] as List<dynamic>?;
+          
+          // Extraer grupos de traducción
+          final scanlationGroups = relationships
+              ?.where((rel) {
+                final relMap = rel as Map<String, dynamic>;
+                return relMap['type'] == 'scanlation_group';
+              })
+              .toList() ?? [];
+
+          if (scanlationGroups.isNotEmpty) {
+            for (final group in scanlationGroups) {
+              final groupMap = group as Map<String, dynamic>;
+              final attributes = groupMap['attributes'] as Map<String, dynamic>?;
+              final editorialName = attributes?['name'] as String? ?? 'Desconocido';
+
+              // Crear link para leer el capítulo
+              final editorialLink = chapterMap['id'] as String;
+
+              // Fecha de publicación
+              final chapterAttributes = chapterMap['attributes'] as Map<String, dynamic>;
+              final dateRelease = _formatDate(
+                chapterAttributes['publishAt'] as String?,
+              );
+
+              editorials.add(
+                EditorialEntity(
+                  editorialName: editorialName,
+                  editorialLink: editorialLink,
+                  dateRelease: dateRelease,
+                ),
+              );
+            }
+          } else {
+            // Si no hay grupos de traducción, crear una editorial genérica
+            final chapterAttributes = chapterMap['attributes'] as Map<String, dynamic>;
+            editorials.add(
+              EditorialEntity(
+                editorialName: 'MangaDex',
+                editorialLink: chapterMap['id'] as String,
+                dateRelease: _formatDate(
+                  chapterAttributes['publishAt'] as String?,
+                ),
+              ),
+            );
+          }
+        }
+
+        // Crear el capítulo
+        final chapter = ChapterEntity(
+          numAndTitleCap: chapterTitle,
+          dateRelease: _formatDate(firstAttributes['publishAt'] as String?),
+          editorials: editorials,
+        );
+
+        chapters.add(chapter);
+      });
+
+      // Ordenar capítulos por número (descendente - más reciente primero)
+      chapters.sort((a, b) {
+        final numA = _extractChapterNumber(a.numAndTitleCap);
+        final numB = _extractChapterNumber(b.numAndTitleCap);
+        return numB.compareTo(numA);
+      });
+
+      return chapters;
+    } catch (e) {
+      print('Error formateando lista de capítulos: $e');
+      return [];
+    }
+  }
+
+  double _extractChapterNumber(String title) {
+    // Extraer el número de capítulo del título
+    final match = RegExp(r'Ch\.(\d+(?:\.\d+)?)').firstMatch(title);
+    if (match != null) {
+      return double.tryParse(match.group(1)!) ?? 0.0;
+    }
+    return 0.0;
+  }
+
+  String _formatDate(String? dateString) {
+    if (dateString == null || dateString.isEmpty) {
+      return 'Fecha desconocida';
+    }
+
+    try {
+      final date = DateTime.parse(dateString);
+      
+      // Formatear fecha como "dd/MM/yyyy"
+      final day = date.day.toString().padLeft(2, '0');
+      final month = date.month.toString().padLeft(2, '0');
+      final year = date.year.toString();
+      
+      return '$day/$month/$year';
+    } catch (e) {
+      print('Error formateando fecha: $e');
+      return 'Fecha desconocida';
     }
   }
 
@@ -201,8 +353,14 @@ class MangaDexService implements IMangaService {
 
   String _extractCoverImage(Map<String, dynamic> item) {
     try {
+      print('🔍 _extractCoverImage - Manga ID: ${item['id']}');
       final relationships = item['relationships'] as List<dynamic>?;
-      if (relationships == null) return '';
+      print('🔍 _extractCoverImage - Relationships: ${relationships?.length ?? 0}');
+      
+      if (relationships == null) {
+        print('❌ _extractCoverImage - No hay relationships');
+        return '';
+      }
 
       // Buscar el cover_art en las relaciones
       final coverArt = relationships.firstWhere(
@@ -213,14 +371,21 @@ class MangaDexService implements IMangaService {
       if (coverArt != null) {
         final coverArtMap = coverArt as Map<String, dynamic>;
         final fileName = coverArtMap['attributes']?['fileName'] as String?;
+        print('🔍 _extractCoverImage - fileName: $fileName');
         if (fileName != null) {
-          return 'https://uploads.mangadex.org/covers/${item['id']}/$fileName.256.jpg';
+          final imageUrl = 'https://uploads.mangadex.org/covers/${item['id']}/$fileName.256.jpg';
+          print('✅ _extractCoverImage - URL generada: $imageUrl');
+          return imageUrl;
+        } else {
+          print('❌ _extractCoverImage - fileName es null');
         }
+      } else {
+        print('❌ _extractCoverImage - No se encontró cover_art en relationships');
       }
 
       return '';
     } catch (e) {
-      print('Error extrayendo imagen de portada: $e');
+      print('❌ Error extrayendo imagen de portada: $e');
       return '';
     }
   }

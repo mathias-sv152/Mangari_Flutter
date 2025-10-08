@@ -158,6 +158,7 @@ class _MangaListViewState extends State<MangaListView> {
       author: entity.authors.isNotEmpty ? entity.authors.first : '',
       status: entity.status,
       source: entity.serverSource,
+      referer: entity.referer,
     );
   }
 

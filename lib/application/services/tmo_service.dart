@@ -1,6 +1,8 @@
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
 import '../../domain/entities/manga_entity.dart';
+import '../../domain/entities/chapter_entity.dart';
+import '../../domain/entities/editorial_entity.dart';
 import '../interfaces/i_manga_service.dart';
 import '../../domain/interfaces/i_tmo_repository.dart';
 import '../../infrastructure/utils/html_utils.dart';
@@ -33,6 +35,8 @@ class TmoService implements IMangaService {
   @override
   Future<MangaEntity> getMangaDetail(String mangaId) async {
     try {
+      //elimina los espacios en blanco al inicio y final de mangaid
+      mangaId = mangaId.trim();
       // Para TMO, el mangaId es la URL completa del manga
       final htmlContent = await _tmoRepository.getMangaDetail(mangaId);
       final mangaDetail = _formatMangaDetail(htmlContent, mangaId);
@@ -143,6 +147,7 @@ class TmoService implements IMangaService {
               status: demography.isNotEmpty ? demography : 'unknown',
               serverSource: 'tmo',
               genres: bookType.isNotEmpty ? [bookType] : [],
+              referer: 'https://zonatmo.com',
             ),
           );
         }
@@ -186,6 +191,9 @@ class TmoService implements IMangaService {
       final statusElement = HtmlUtils.findElement(document, 'span.book-status, .status');
       final status = HtmlUtils.getTextContent(statusElement);
 
+      // Extraer capítulos
+      final chapters = _extractChapters(document);
+      
       // Extraer imagen de portada
       String? coverImageUrl;
       final imageElement = HtmlUtils.findElement(document, '.cover img, .thumbnail img, img[src*="cover"]');
@@ -204,14 +212,186 @@ class TmoService implements IMangaService {
         authors: author != null ? [author] : [],
         genres: genres,
         status: status.isNotEmpty ? status : 'unknown',
+        chapters: chapters,
         serverSource: 'tmo',
+        referer: 'https://zonatmo.com',
       );
     } catch (e) {
       throw Exception('Error procesando HTML de detalles: $e');
     }
   }
 
-  /// Extrae el uniqid de los scripts de la página
+  /// Extrae los capítulos del documento HTML
+  List<ChapterEntity> _extractChapters(dom.Document document) {
+    final allChapters = <ChapterEntity>[];
+
+    // Extraer capítulos (primer selector: #chapters > ul > li)
+    final chapterElements1 = HtmlUtils.findElements(document, '#chapters > ul > li');
+    allChapters.addAll(_parseChapterElements(chapterElements1));
+
+    // Extraer capítulos (segundo selector: #chapters > ul > div > li)
+    final chapterElements2 = HtmlUtils.findElements(document, '#chapters > ul > div > li');
+    allChapters.addAll(_parseChapterElements(chapterElements2));
+
+    // Si no hay capítulos, intentar con oneshot
+    if (allChapters.isEmpty) {
+      final oneshotChapter = _extractOneshotChapter(document);
+      if (oneshotChapter != null) {
+        allChapters.add(oneshotChapter);
+      }
+    }
+
+    return allChapters;
+  }
+
+  /// Parsea una lista de elementos de capítulos
+  List<ChapterEntity> _parseChapterElements(List<dom.Element> chapterElements) {
+    final chapters = <ChapterEntity>[];
+
+    for (final chapterElement in chapterElements) {
+      // Obtener número y título del capítulo
+      final numCapElement = HtmlUtils.findElement(
+        chapterElement,
+        'h4 > div > div.col-10.text-truncate > a',
+      );
+      final numAndTitleCap = numCapElement != null
+          ? HtmlUtils.getTextContent(numCapElement).trim()
+          : '';
+
+      // Si no hay título de capítulo, saltamos este elemento
+      if (numAndTitleCap.isEmpty) continue;
+
+      // Obtener elementos de editorial
+      final editorialElements = HtmlUtils.findElements(
+        chapterElement,
+        'div > div > ul > li',
+      );
+      final editorials = <EditorialEntity>[];
+
+      for (final editorialElement in editorialElements) {
+        // Nombre de la editorial
+        final nameElement = HtmlUtils.findElement(
+          editorialElement,
+          'div > div.col-4.col-md-6.text-truncate > span',
+        );
+        final editorialName = nameElement != null
+            ? HtmlUtils.getTextContent(nameElement).replaceAll(RegExp(r'\s+'), ' ').trim()
+            : 'N/A';
+
+        // Link de la editorial
+        final linkElement = HtmlUtils.findElement(
+          editorialElement,
+          'div > div.col-2.col-sm-1.text-right > a',
+        );
+        var editorialLink = linkElement != null
+            ? HtmlUtils.getAttribute(linkElement, 'href')
+            : '';
+
+        // Reemplazar dominio si es necesario
+        if (editorialLink.isNotEmpty && editorialLink.contains('visortmo.com')) {
+          editorialLink = editorialLink.replaceAll(
+            'https://visortmo.com',
+            'https://lectortmo.com',
+          );
+        }
+
+        // Fecha de publicación
+        final dateElement = HtmlUtils.findElement(
+          editorialElement,
+          'div > div.col-4.col-md-2.text-center > span',
+        );
+        final dateRelease = dateElement != null
+            ? HtmlUtils.getTextContent(dateElement).trim()
+            : '';
+
+        editorials.add(
+          EditorialEntity(
+            editorialName: editorialName,
+            editorialLink: editorialLink,
+            dateRelease: dateRelease,
+          ),
+        );
+      }
+
+      // Solo agregamos el capítulo si tiene editoriales
+      if (editorials.isNotEmpty) {
+        // Fecha de lanzamiento del capítulo
+        final dateElement = HtmlUtils.findElement(
+          chapterElement,
+          'div > div > ul > li > div > div.col-4.col-md-2.text-center > span',
+        );
+        final dateRelease = dateElement != null
+            ? HtmlUtils.getTextContent(dateElement).trim()
+            : '';
+
+        chapters.add(
+          ChapterEntity(
+            numAndTitleCap: numAndTitleCap,
+            dateRelease: dateRelease,
+            editorials: editorials,
+          ),
+        );
+      }
+    }
+
+    return chapters;
+  }
+
+  /// Extrae capítulo oneshot (cuando no hay capítulos regulares)
+  ChapterEntity? _extractOneshotChapter(dom.Document document) {
+    final oneshotElements = HtmlUtils.findElements(
+      document,
+      '.chapter-list-element .list-group-item',
+    );
+    final oneshotEditorials = <EditorialEntity>[];
+
+    for (final element in oneshotElements) {
+      // Nombre de la editorial
+      final nameElement = HtmlUtils.findElement(
+        element,
+        '.col-4.col-md-6.text-truncate > span',
+      );
+      final editorialName = nameElement != null
+          ? HtmlUtils.getTextContent(nameElement).trim()
+          : '';
+
+      // Fecha de publicación
+      final dateElement = HtmlUtils.findElement(
+        element,
+        '.col-4.col-md-2.text-center > span',
+      );
+      final dateRelease = dateElement != null
+          ? HtmlUtils.getTextContent(dateElement).trim()
+          : '';
+
+      // Link de la editorial
+      final linkElement = HtmlUtils.findElement(
+        element,
+        '.col-2.text-right > a',
+      );
+      final editorialLink = linkElement != null
+          ? HtmlUtils.getAttribute(linkElement, 'href')
+          : '';
+
+      oneshotEditorials.add(
+        EditorialEntity(
+          editorialName: editorialName,
+          editorialLink: editorialLink,
+          dateRelease: dateRelease,
+        ),
+      );
+    }
+
+    if (oneshotEditorials.isNotEmpty) {
+      return ChapterEntity(
+        numAndTitleCap: '',
+        dateRelease: '',
+        editorials: oneshotEditorials,
+      );
+    }
+
+    return null;
+  }  /// Extrae el uniqid de los scripts de la página
   String? _extractUniqidFromScripts(dom.Document document) {
     try {
       final scriptElements = HtmlUtils.getElementsByTagName(document, 'script');

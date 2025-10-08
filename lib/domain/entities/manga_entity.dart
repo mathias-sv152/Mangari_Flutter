@@ -1,3 +1,5 @@
+import 'package:mangari/domain/entities/chapter_entity.dart';
+
 /// Entidad de dominio para Manga
 /// Representa un manga en el sistema
 class MangaEntity {
@@ -13,8 +15,10 @@ class MangaEntity {
   final int? year;
   final double? rating;
   final int? chapterCount;
+  final List<ChapterEntity> chapters;
   final DateTime? lastUpdated;
   final String serverSource; // mangadex, tmo, etc.
+  final String referer;
 
   MangaEntity({
     required this.id,
@@ -29,8 +33,10 @@ class MangaEntity {
     this.year,
     this.rating,
     this.chapterCount,
+    this.chapters = const [],
     this.lastUpdated,
     required this.serverSource,
+    required this.referer,
   });
 
   @override
@@ -52,8 +58,10 @@ class MangaEntity {
     int? year,
     double? rating,
     int? chapterCount,
+    List<ChapterEntity>? chapters,
     DateTime? lastUpdated,
     String? serverSource,
+    String? referer,
   }) {
     return MangaEntity(
       id: id ?? this.id,
@@ -68,8 +76,10 @@ class MangaEntity {
       year: year ?? this.year,
       rating: rating ?? this.rating,
       chapterCount: chapterCount ?? this.chapterCount,
+      chapters: chapters ?? this.chapters,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       serverSource: serverSource ?? this.serverSource,
+      referer: referer ?? this.referer,
     );
   }
 }

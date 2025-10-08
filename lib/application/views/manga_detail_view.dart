@@ -93,6 +93,10 @@ class _MangaDetailViewState extends State<MangaDetailView> {
 
       final detailedManga = await _serversService!.getMangaDetailFromServer(serverId, widget.manga.id);
       
+      print('📚 Capítulos obtenidos del servidor: ${detailedManga.chapters.length}');
+      print('🖼️ URL de imagen del listado (widget.manga): ${widget.manga.linkImage}');
+      print('🖼️ URL de imagen del servidor (detailedManga): ${detailedManga.coverImageUrl}');
+      
       // Convertir de vuelta a MangaDetailEntity
       final detailedMangaEntity = MangaDetailEntity(
         title: detailedManga.title,
@@ -103,11 +107,12 @@ class _MangaDetailViewState extends State<MangaDetailView> {
         id: detailedManga.id,
         service: serverId,
         description: detailedManga.description ?? widget.manga.description,
-        genres: widget.manga.genres,
-        chapters: widget.manga.chapters,
+        genres: detailedManga.genres.map((genreText) => GenreEntity(text: genreText, href: '')).toList(),
+        chapters: detailedManga.chapters,
         author: detailedManga.authors.isNotEmpty ? detailedManga.authors.first : widget.manga.author,
         status: detailedManga.status,
         source: detailedManga.serverSource,
+        referer: detailedManga.referer ?? widget.manga.referer,
       );
       
       setState(() {
@@ -139,10 +144,12 @@ class _MangaDetailViewState extends State<MangaDetailView> {
   Widget build(BuildContext context) {
     // Si hay un capítulo seleccionado, mostrar el lector
     if (_selectedChapter != null) {
+      final manga = _mangaDetail ?? widget.manga;
       return MangaReaderView(
         chapter: _selectedChapter!,
         server: widget.server,
-        mangaTitle: widget.manga.title,
+        mangaTitle: manga.title,
+        referer: manga.referer ?? '',
         onBack: () {
           setState(() {
             _selectedChapter = null;
@@ -297,10 +304,9 @@ class _MangaDetailViewState extends State<MangaDetailView> {
                 child: Stack(
                   children: [
                     CachedNetworkImage(
-                      imageUrl: manga.linkImage,
+                      imageUrl: manga.linkImage.trim(),
                       httpHeaders: {
                         'Referer': manga.referer ?? '',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                       },
                       fit: BoxFit.cover,
                       width: double.infinity,

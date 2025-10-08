@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart';
 import 'package:mangari/domain/interfaces/i_mangadex_reporitory.dart';
 import '../client/api_client.dart';
+import 'package:http/http.dart' as http;
 
 class MangaDexRepository implements IMangaDexRepository {
   final Client _apiClient;
@@ -36,9 +37,9 @@ class MangaDexRepository implements IMangaDexRepository {
   @override
   Future<Map<String, dynamic>> getMangaDetail(String mangaId) async {
     try {
-      final endpoint = '/manga/$mangaId';
+      final endpoint = '/manga/$mangaId?includes[]=artist&includes[]=author&includes[]=cover_art';
       final url = Uri.parse('$baseUrl$endpoint');
-      final response = await _apiClient.get(url);
+      final response = await http.get(url);
       return json.decode(response.body) as Map<String, dynamic>;
     } catch (e) {
       throw Exception('Error al obtener detalles del manga: $e');
@@ -62,8 +63,9 @@ class MangaDexRepository implements IMangaDexRepository {
           '&includeUnavailable=0';
       
       final endpoint = '/manga/$mangaId/feed?$params';
-      final url = Uri.parse('$baseUrl$endpoint');
-      final response = await _apiClient.get(url);
+      // final url = Uri.parse('$baseUrl$endpoint');
+      final response = await http.get(Uri.parse('$baseUrl$endpoint'));
+      print(response);
       return json.decode(response.body) as Map<String, dynamic>;
     } catch (e) {
       throw Exception('Error al obtener capítulos: $e');
