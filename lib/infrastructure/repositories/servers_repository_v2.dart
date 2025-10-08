@@ -80,6 +80,16 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         baseUrl: 'https://uchuujinmangas.com',
         isActive: false,
       ),
+      ServerEntity(
+        // servidor a implementar
+        id: 'tmohentai',
+        name: 'TMO Hentai',
+        iconUrl: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT41h_Eezrjf_r4rQJrnBPU7bk8vQHy9CidjQ&s',
+        language: 'Es',
+        baseUrl: 'https://tmohentai.com',
+        isActive: false,
+        isAdult: true,
+      ),
     ];
   }
 
