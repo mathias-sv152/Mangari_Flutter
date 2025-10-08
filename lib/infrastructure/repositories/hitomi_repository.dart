@@ -25,7 +25,7 @@ class HitomiRepository implements IHitomiRepository {
   Future<List<Map<String, dynamic>>> _getMangaNozomi(int page) async {
     try {
       // Hitomi usa un sistema de nozomi para las listas con paginación por bytes
-      final nozomiUrl = 'https://ltn.gold-usergeneratedcontent.net/index-spanish.nozomi';
+      final nozomiUrl = 'https://ltn.gold-usergeneratedcontent.net/popular/year-spanish.nozomi';
 
       // Calcular el rango de bytes para la página
       const galleriesPerPage = 25;
@@ -192,7 +192,16 @@ class HitomiRepository implements IHitomiRepository {
           // Extraer la primera URL del srcset
           final urls = dataSrcset.split(',');
           if (urls.isNotEmpty) {
-            final firstUrl = urls[0].trim().split(' ')[0];
+            var firstUrl = urls[0].trim().split(' ')[0];
+            
+            // Reemplazar el dominio si es necesario ANTES de agregar el protocolo
+            if (firstUrl.contains('//tn.hitomi.la')) {
+              firstUrl = firstUrl.replaceAll('//tn.hitomi.la', '//atn.gold-usergeneratedcontent.net');
+            } else if (firstUrl.contains('tn.hitomi.la')) {
+              firstUrl = firstUrl.replaceAll('tn.hitomi.la', 'atn.gold-usergeneratedcontent.net');
+            }
+            
+            // Ahora agregar el protocolo si es necesario
             if (firstUrl.startsWith('//')) {
               linkImage = 'https:$firstUrl';
             } else if (firstUrl.startsWith('http')) {
@@ -209,8 +218,16 @@ class HitomiRepository implements IHitomiRepository {
           imgElement = HtmlUtils.findElement(document, '.gg-img1 picture img');
         }
         if (imgElement != null) {
-          final dataSrc = HtmlUtils.getAttribute(imgElement, 'data-src');
+          var dataSrc = HtmlUtils.getAttribute(imgElement, 'data-src');
           if (dataSrc.isNotEmpty) {
+            // Reemplazar el dominio si es necesario ANTES de agregar el protocolo
+            if (dataSrc.contains('//tn.hitomi.la')) {
+              dataSrc = dataSrc.replaceAll('//tn.hitomi.la', '//atn.gold-usergeneratedcontent.net');
+            } else if (dataSrc.contains('tn.hitomi.la')) {
+              dataSrc = dataSrc.replaceAll('tn.hitomi.la', 'atn.gold-usergeneratedcontent.net');
+            }
+            
+            // Ahora agregar el protocolo si es necesario
             if (dataSrc.startsWith('//')) {
               linkImage = 'https:$dataSrc';
             } else if (dataSrc.startsWith('http')) {

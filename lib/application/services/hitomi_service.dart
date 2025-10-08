@@ -23,7 +23,8 @@ class HitomiService implements IMangaService {
   Future<List<MangaEntity>> getAllMangas({int page = 1, int limit = 20}) async {
     try {
       final galleries = await _hitomiRepository.getManga(page);
-      return _formatListManga(galleries);
+      final formattedList = _formatListManga(galleries);
+      return formattedList;
     } catch (error) {
       print('Error en HitomiService getAllMangas: $error');
       return [];
