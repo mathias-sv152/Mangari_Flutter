@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
@@ -67,10 +68,25 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void initState() {
     super.initState();
     _initializeWebView();
+    // Configurar la UI del sistema para mostrar las barras inicialmente
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
+    );
     // Posponer la inicialización hasta después del primer frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeService();
     });
+  }
+  
+  @override
+  void dispose() {
+    // Restaurar la UI del sistema al salir
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
+    );
+    super.dispose();
   }
 
   void _initializeService() async {
@@ -344,6 +360,20 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     setState(() {
       _showControls = !_showControls;
     });
+    
+    // Controlar la visibilidad de la barra de estado del sistema
+    if (_showControls) {
+      // Mostrar barra de notificaciones
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
+      );
+    } else {
+      // Ocultar barra de notificaciones (modo inmersivo)
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersive,
+      );
+    }
   }
 
   void _loadHtmlContent() {
@@ -671,84 +701,208 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         .length;
   }
 
+  void _navigateToPage(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= _images.length) return;
+    
+    final script = '''
+      (function() {
+        const container = document.querySelector('[data-index="$pageIndex"]');
+        if (container) {
+          container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      })();
+    ''';
+    
+    _webViewController.runJavaScript(script);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _showControls ? AppBar(
-        backgroundColor: Colors.black.withOpacity(0.8),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: widget.onBack,
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.mangaTitle,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              widget.chapter.chapterTitle,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-        actions: [
-          if (_images.isNotEmpty) ...[
-            if (_failedImagesCount > 0)
-              IconButton(
-                icon: Badge(
-                  label: Text(_failedImagesCount.toString()),
-                  backgroundColor: DraculaTheme.red,
-                  child: const Icon(Icons.refresh, color: DraculaTheme.red),
-                ),
-                onPressed: _retryAllFailedImages,
-                tooltip: 'Reintentar imágenes fallidas',
-              ),
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      '${_currentPage + 1}/${_images.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
+      body: Stack(
+        children: [
+          _buildBody(),
+          _buildAnimatedAppBar(),
+          _buildAnimatedBottomBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnimatedAppBar() {
+    return AnimatedSlide(
+      offset: _showControls ? Offset.zero : const Offset(0, -1),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      child: AnimatedOpacity(
+        opacity: _showControls ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.75),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: Container(
+              height: kToolbarHeight + 10,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: widget.onBack,
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          widget.mangaTitle,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          widget.chapter.chapterTitle,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_images.isNotEmpty) ...[
+                    if (_failedImagesCount > 0)
+                      IconButton(
+                        icon: Badge(
+                          label: Text(_failedImagesCount.toString()),
+                          backgroundColor: DraculaTheme.red,
+                          child: const Icon(Icons.refresh, color: DraculaTheme.red),
+                        ),
+                        onPressed: _retryAllFailedImages,
+                        tooltip: 'Reintentar imágenes fallidas',
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '${_currentPage + 1}/${_images.length}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (_loadedImagesCount < _images.length)
+                            Text(
+                              '$_loadedImagesCount cargadas',
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    if (_loadedImagesCount < _images.length)
-                      Text(
-                        '$_loadedImagesCount cargadas',
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 10,
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedBottomBar() {
+    if (_images.isEmpty) return const SizedBox.shrink();
+    
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: AnimatedSlide(
+        offset: _showControls ? Offset.zero : const Offset(0, 1),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        child: AnimatedOpacity(
+          opacity: _showControls ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          child: Container(
+            color: Colors.black.withOpacity(0.75),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '${_currentPage + 1}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderThemeData(
+                              activeTrackColor: DraculaTheme.purple,
+                              inactiveTrackColor: DraculaTheme.purple.withOpacity(0.3),
+                              thumbColor: DraculaTheme.purple,
+                              overlayColor: DraculaTheme.purple.withOpacity(0.3),
+                              trackHeight: 4,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 8,
+                              ),
+                            ),
+                            child: Slider(
+                              value: _currentPage.toDouble(),
+                              min: 0,
+                              max: (_images.length - 1).toDouble(),
+                              divisions: _images.length - 1,
+                              onChanged: (value) {
+                                final newPage = value.round();
+                                if (newPage != _currentPage) {
+                                  setState(() {
+                                    _currentPage = newPage;
+                                  });
+                                  _navigateToPage(newPage);
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${_images.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
             ),
-          ],
-        ],
-      ) : null,
-      body: Stack(
-        children: [
-          _buildBody(),
-        ],
+          ),
+        ),
       ),
     );
   }

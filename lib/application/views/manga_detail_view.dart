@@ -252,16 +252,21 @@ class _MangaDetailViewState extends State<MangaDetailView> {
 
     final manga = _mangaDetail ?? widget.manga;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeroSection(manga),
-          if (manga.genres.isNotEmpty) _buildGenresSection(manga.genres),
-          if (manga.description.isNotEmpty) _buildDescriptionSection(manga.description),
-          _buildChaptersSection(manga.chapters),
-        ],
+    return RefreshIndicator(
+      onRefresh: _loadMangaDetails,
+      color: DraculaTheme.purple,
+      backgroundColor: DraculaTheme.currentLine,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeroSection(manga),
+            if (manga.genres.isNotEmpty) _buildGenresSection(manga.genres),
+            if (manga.description.isNotEmpty) _buildDescriptionSection(manga.description),
+            _buildChaptersSection(manga.chapters),
+          ],
+        ),
       ),
     );
   }

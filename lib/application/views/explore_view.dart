@@ -380,15 +380,7 @@ class _ExploreViewState extends State<ExploreView> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Servidor de manga ${server.serviceName ?? server.name}',
-                style: const TextStyle(
-                  color: DraculaTheme.foreground,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
               Row(
                 children: [
                   _buildInfoChip(
@@ -402,6 +394,14 @@ class _ExploreViewState extends State<ExploreView> {
                     server.serviceName ?? 'Servicio',
                     DraculaTheme.orange,
                   ),
+                  if (server.isAdult) ...[
+                    const SizedBox(width: 8),
+                    _buildInfoChip(
+                      Icons.warning_rounded,
+                      '18+',
+                      DraculaTheme.red,
+                    ),
+                  ],
                 ],
               ),
             ],
