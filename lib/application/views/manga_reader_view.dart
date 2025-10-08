@@ -5,7 +5,8 @@ import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 enum ImageLoadState {
@@ -62,12 +63,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   int _currentPage = 0;
   bool _showControls = true;
   
-  late WebViewController _webViewController;
+  InAppWebViewController? _webViewController;
 
   @override
   void initState() {
     super.initState();
-    _initializeWebView();
     // Configurar la UI del sistema para mostrar las barras inicialmente
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -119,61 +119,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     }
   }
 
-  void _initializeWebView() {
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..enableZoom(true)  // Habilitar zoom nativo
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (String url) {
-            // WebView está listo
-          },
-        ),
-      )
-      ..addJavaScriptChannel(
-        'PageTracker',
-        onMessageReceived: (JavaScriptMessage message) {
-          final pageData = jsonDecode(message.message);
-          setState(() {
-            _currentPage = pageData['currentPage'] ?? 0;
-          });
-        },
-      )
-      ..addJavaScriptChannel(
-        'ToggleControls',
-        onMessageReceived: (JavaScriptMessage message) {
-          _toggleControls();
-        },
-      )
-      ..addJavaScriptChannel(
-        'ImageLoaded',
-        onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          _handleImageLoaded(data['index']);
-        },
-      )
-      ..addJavaScriptChannel(
-        'ImageError',
-        onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          _handleImageError(data['index'], data['error']);
-        },
-      )
-      ..addJavaScriptChannel(
-        'RetryImage',
-        onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          _retryImageManually(data['index']);
-        },
-      )
-      ..addJavaScriptChannel(
-        'Console',
-        onMessageReceived: (JavaScriptMessage message) {
-          print('WebView Console: ${message.message}');
-        },
-      );
-  }
+
 
   void _handleImageLoaded(int index) {
     if (mounted && _imageStates.containsKey(index)) {
@@ -244,7 +190,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       })();
     ''';
     
-    _webViewController.runJavaScript(script);
+    _webViewController?.evaluateJavascript(source: script);
   }
 
   void _retryImageManually(int index) {
@@ -315,11 +261,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       });
 
-      // Cargar contenido HTML tan pronto como tengamos las imágenes
-      if (_images.isNotEmpty) {
+      // Si el WebView ya está creado, cargar el contenido
+      if (_webViewController != null && _images.isNotEmpty) {
         _loadHtmlContent();
-        // Inyectar el JavaScript para interceptar las peticiones de imágenes
-        _injectImageInterceptor();
       }
     } catch (e) {
       setState(() {
@@ -329,7 +273,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     }
   }
 
-  void _injectImageInterceptor() {
+  Future<void> _injectImageInterceptor() async {
     // Inyectar JavaScript para manejar la carga de imágenes con el referer correcto
     final script = '''
       (function() {
@@ -353,7 +297,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       })();
     ''';
     
-    _webViewController.runJavaScript(script);
+    await _webViewController?.evaluateJavascript(source: script);
   }
 
   void _toggleControls() {
@@ -380,7 +324,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     final htmlContent = _generateHtmlContent();
     print('Loading HTML content with ${_images.length} images');
     print('🔍 Using referer: ${widget.referer}');
-    _webViewController.loadHtmlString(htmlContent, baseUrl: widget.referer);
+    _webViewController?.loadData(data: htmlContent);
   }
 
   String _generateHtmlContent() {
@@ -562,8 +506,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           img.parentElement.classList.add('image-loaded');
           img.parentElement.querySelector('.loading-overlay').style.display = 'none';
           
-          if (window.ImageLoaded) {
-            window.ImageLoaded.postMessage(JSON.stringify({
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('ImageLoaded', JSON.stringify({
               index: index
             }));
           }
@@ -584,8 +528,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             container.querySelector('.loading-text').textContent = 
               'Reintentando... (' + (retryCount + 1) + '/' + MAX_RETRIES + ')';
             
-            if (window.ImageError) {
-              window.ImageError.postMessage(JSON.stringify({
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('ImageError', JSON.stringify({
                 index: index,
                 error: 'Load failed',
                 retryCount: retryCount + 1
@@ -596,8 +540,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             container.querySelector('.loading-overlay').style.display = 'none';
             container.querySelector('.error-overlay').style.display = 'flex';
             
-            if (window.ImageError) {
-              window.ImageError.postMessage(JSON.stringify({
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('ImageError', JSON.stringify({
                 index: index,
                 error: 'Failed after ' + MAX_RETRIES + ' retries',
                 retryCount: retryCount
@@ -625,8 +569,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           loadingOverlay.querySelector('.loading-text').textContent = 'Cargando imagen ' + (index + 1) + '...';
           img.classList.remove('loaded');
           
-          if (window.RetryImage) {
-            window.RetryImage.postMessage(JSON.stringify({
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('RetryImage', JSON.stringify({
               index: index
             }));
           }
@@ -646,8 +590,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             if (imageTop <= scrollTop + windowHeight / 2 && imageBottom >= scrollTop + windowHeight / 2) {
               if (currentPage !== i) {
                 currentPage = i;
-                if (window.PageTracker) {
-                  window.PageTracker.postMessage(JSON.stringify({
+                if (window.flutter_inappwebview) {
+                  window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
                     currentPage: currentPage,
                     totalPages: images.length
                   }));
@@ -665,8 +609,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Toggle controls on tap (excepto en botones)
         document.addEventListener('click', function(e) {
           if (!e.target.classList.contains('retry-button')) {
-            if (window.ToggleControls) {
-              window.ToggleControls.postMessage('toggle');
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('ToggleControls', 'toggle');
             }
           }
         });
@@ -713,7 +657,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       })();
     ''';
     
-    _webViewController.runJavaScript(script);
+    _webViewController?.evaluateJavascript(source: script);
   }
 
   @override
@@ -982,7 +926,140 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       );
     }
 
-    // WebView con el contenido HTML
-    return WebViewWidget(controller: _webViewController);
+    // WebView con el contenido HTML usando InAppWebView
+    return InAppWebView(
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        supportZoom: true,
+        builtInZoomControls: true,
+        displayZoomControls: false,
+        useHybridComposition: true,
+        allowFileAccessFromFileURLs: true,
+        allowUniversalAccessFromFileURLs: true,
+        useShouldOverrideUrlLoading: true,
+        mediaPlaybackRequiresUserGesture: false,
+        transparentBackground: false,
+        // Optimizaciones de rendimiento
+        cacheEnabled: true,
+        clearCache: false,
+        disableContextMenu: true,
+        minimumFontSize: 1,
+        // Mejoras de carga de imágenes
+        loadsImagesAutomatically: true,
+        useWideViewPort: true,
+        loadWithOverviewMode: true,
+        // Seguridad
+        allowContentAccess: true,
+        allowFileAccess: true,
+        // IMPORTANTE: Habilitar interceptor de recursos
+        useShouldInterceptRequest: true,
+      ),
+      onWebViewCreated: (controller) {
+        _webViewController = controller;
+        
+        // Agregar JavaScript handlers
+        controller.addJavaScriptHandler(
+          handlerName: 'PageTracker',
+          callback: (args) {
+            final message = args[0] as String;
+            final pageData = jsonDecode(message);
+            setState(() {
+              _currentPage = pageData['currentPage'] ?? 0;
+            });
+          },
+        );
+        
+        controller.addJavaScriptHandler(
+          handlerName: 'ToggleControls',
+          callback: (args) {
+            _toggleControls();
+          },
+        );
+        
+        controller.addJavaScriptHandler(
+          handlerName: 'ImageLoaded',
+          callback: (args) {
+            final message = args[0] as String;
+            final data = jsonDecode(message);
+            _handleImageLoaded(data['index']);
+          },
+        );
+        
+        controller.addJavaScriptHandler(
+          handlerName: 'ImageError',
+          callback: (args) {
+            final message = args[0] as String;
+            final data = jsonDecode(message);
+            _handleImageError(data['index'], data['error']);
+          },
+        );
+        
+        controller.addJavaScriptHandler(
+          handlerName: 'RetryImage',
+          callback: (args) {
+            final message = args[0] as String;
+            final data = jsonDecode(message);
+            _retryImageManually(data['index']);
+          },
+        );
+        
+        controller.addJavaScriptHandler(
+          handlerName: 'Console',
+          callback: (args) {
+            final message = args[0] as String;
+            print('WebView Console: $message');
+          },
+        );
+        
+        // Cargar el contenido HTML después de configurar los handlers
+        if (_images.isNotEmpty) {
+          _loadHtmlContent();
+        }
+      },
+      onLoadStop: (controller, url) async {
+        // WebView terminó de cargar
+        await _injectImageInterceptor();
+      },
+      onConsoleMessage: (controller, consoleMessage) {
+        print('WebView Console: ${consoleMessage.message}');
+      },
+      shouldInterceptRequest: (controller, request) async {
+        // Interceptar todas las peticiones de recursos
+        final url = request.url.toString();
+        
+        // Si es una imagen de nuestras URLs, agregar el referer
+        if (_images.any((imageUrl) => url.contains(imageUrl) || imageUrl.contains(url))) {
+          print('🔗 Interceptando petición de imagen: $url');
+          
+          try {
+            // Realizar la petición con el referer correcto
+            final response = await http.get(
+              Uri.parse(url),
+              headers: {
+                'Referer': widget.referer,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            );
+            
+            if (response.statusCode == 200) {
+              print('✅ Imagen cargada correctamente: $url');
+              // Retornar la respuesta con los datos de la imagen
+              return WebResourceResponse(
+                contentType: response.headers['content-type'] ?? 'image/jpeg',
+                data: response.bodyBytes,
+                statusCode: response.statusCode,
+              );
+            } else {
+              print('❌ Error al cargar imagen: ${response.statusCode}');
+            }
+          } catch (e) {
+            print('❌ Error en petición de imagen: $e');
+          }
+        }
+        
+        // Dejar que otras peticiones pasen normalmente
+        return null;
+      },
+    );
   }
 }
