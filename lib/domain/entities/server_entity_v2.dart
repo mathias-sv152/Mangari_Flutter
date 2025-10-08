@@ -8,6 +8,7 @@ class ServerEntity {
   final String baseUrl;
   final bool isActive;
   final String? serviceName; // Nombre del servicio asociado
+  final bool isAdult;
 
   ServerEntity({
     required this.id,
@@ -17,6 +18,7 @@ class ServerEntity {
     required this.baseUrl,
     required this.isActive,
     this.serviceName,
+    this.isAdult = false,
   });
 
   @override
@@ -33,6 +35,7 @@ class ServerEntity {
     String? baseUrl,
     bool? isActive,
     String? serviceName,
+    String? isAdult,
   }) {
     return ServerEntity(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class ServerEntity {
       baseUrl: baseUrl ?? this.baseUrl,
       isActive: isActive ?? this.isActive,
       serviceName: serviceName ?? this.serviceName,
+      isAdult: isAdult == null ? this.isAdult : isAdult == 'true',
     );
   }
 }

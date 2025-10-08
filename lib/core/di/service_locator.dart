@@ -3,14 +3,17 @@ import 'package:http/http.dart' as http;
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/domain/interfaces/i_mangadex_reporitory.dart';
 import 'package:mangari/domain/interfaces/i_tmo_repository.dart';
+import 'package:mangari/domain/interfaces/i_hitomi_repository.dart';
 
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/application/services/tmo_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
+import 'package:mangari/application/services/hitomi_service.dart';
 
 import 'package:mangari/infrastructure/repositories/mangadex_repository.dart';
 import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
 import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
+import 'package:mangari/infrastructure/repositories/hitomi_repository.dart';
 import 'package:mangari/infrastructure/client/api_client.dart';
 
 final GetIt getIt = GetIt.instance;
@@ -47,6 +50,9 @@ void setupDependencies() {
     getIt.registerLazySingleton<IMangaDexRepository>(
       () => MangaDexRepository(getIt<http.Client>()),
     );
+    getIt.registerLazySingleton<IHitomiRepository>(
+      () => HitomiRepository(getIt<http.Client>()),
+    );
 
     print('🔧 Registrando services...');
     // ========== SERVICES (Application) ==========
@@ -58,12 +64,17 @@ void setupDependencies() {
       () => MangaDexService(getIt<IMangaDexRepository>()),
     );
 
+    getIt.registerLazySingleton<HitomiService>(
+      () => HitomiService(hitomiRepository: getIt<IHitomiRepository>()),
+    );
+
     print('🔧 Registrando repositories v2...');
     // ========== REPOSITORIES V2 ==========
     getIt.registerLazySingleton<IServersRepositoryV2>(
       () => ServersRepositoryV2(
         mangaDexService: getIt<MangaDexService>(),
         tmoService: getIt<TmoService>(),
+        hitomiService: getIt<HitomiService>(),
       ),
     );
 
@@ -106,12 +117,18 @@ void _verifyDependencies() {
     final mangaDexRepo = getIt<IMangaDexRepository>();
     print('✓ IMangaDexRepository registrado: ${mangaDexRepo.runtimeType}');
     
+    final hitomiRepo = getIt<IHitomiRepository>();
+    print('✓ IHitomiRepository registrado: ${hitomiRepo.runtimeType}');
+    
     // Verificar services
     final tmoService = getIt<TmoService>();
     print('✓ TmoService registrado: ${tmoService.runtimeType}');
     
     final mangaDexService = getIt<MangaDexService>();
     print('✓ MangaDexService registrado: ${mangaDexService.runtimeType}');
+    
+    final hitomiService = getIt<HitomiService>();
+    print('✓ HitomiService registrado: ${hitomiService.runtimeType}');
     
     // Verificar repository v2
     final serversRepo = getIt<IServersRepositoryV2>();

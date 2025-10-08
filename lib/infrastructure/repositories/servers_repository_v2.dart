@@ -4,25 +4,29 @@ import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/application/interfaces/i_manga_service.dart';
 import 'package:mangari/application/services/tmo_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
+import 'package:mangari/application/services/hitomi_service.dart';
 
-/// Repositorio de Servidores que implementa IServersRepositoryV2  
-/// Maneja únicamente MangaDex como servidor activo usando el servicio de application
+/// Repositorio de Servidores que implementa IServersRepositoryV2
+/// Maneja MangaDex, TMO y Hitomi como servidores activos
 class ServersRepositoryV2 implements IServersRepositoryV2 {
   final MangaDexService _mangaDexService;
   final TmoService _tmoService;
+  final HitomiService _hitomiService;
   late final List<ServerEntity> _servers;
   late final Map<String, IMangaService> _serviceMap;
 
   ServersRepositoryV2({
     required MangaDexService mangaDexService,
     required TmoService tmoService,
+    required HitomiService hitomiService,
   }) : _mangaDexService = mangaDexService,
-       _tmoService = tmoService {
-
+       _tmoService = tmoService,
+       _hitomiService = hitomiService {
     // Inicializar el mapa de servicios
     _serviceMap = {
       'mangadex': _mangaDexService,
       'tmo': _tmoService,
+      'hitomi': _hitomiService,
     };
 
     // Inicializar los servidores con MangaDex y TMO
@@ -45,6 +49,37 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         isActive: _tmoService.isActive,
         serviceName: _tmoService.serverName,
       ),
+      ServerEntity(
+        id: 'hitomi',
+        name: 'Hitomi',
+        iconUrl:
+            'https://ltn.gold-usergeneratedcontent.net/favicon-192x192.png',
+        language: 'Es',
+        baseUrl: 'https://hitomi.la',
+        isActive: _hitomiService.isActive,
+        serviceName: _hitomiService.serverName,
+        isAdult: true,
+      ),
+      ServerEntity(
+        // servidor a implementar
+        id: 'territorioleal',
+        name: 'Territorio Leal',
+        iconUrl:
+            'https://territorioleal.com/wp-content/uploads/2017/10/pngwing.com-1.png',
+        language: 'Es',
+        baseUrl: 'https://territorioprotegido.xyz',
+        isActive: false,
+      ),
+      ServerEntity(
+        // servidor a implementar
+        id: 'uchuujinmangas',
+        name: 'Uchuujin Mangas',
+        iconUrl:
+            'https://uchuujinmangas.com/wp-content/uploads/2024/12/logo2.png',
+        language: 'Es',
+        baseUrl: 'https://uchuujinmangas.com',
+        isActive: false,
+      ),
     ];
   }
 
@@ -54,42 +89,56 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   }
 
   @override
-  Future<List<MangaEntity>> getMangasFromServer(String serverId, {int page = 1, int limit = 20}) async {
+  Future<List<MangaEntity>> getMangasFromServer(
+    String serverId, {
+    int page = 1,
+    int limit = 20,
+  }) async {
     final service = _serviceMap[serverId];
     if (service == null) {
       throw Exception('Servidor no encontrado: $serverId');
     }
-    
+
     return await service.getAllMangas(page: page, limit: limit);
   }
 
   @override
-  Future<MangaEntity> getMangaDetailFromServer(String serverId, String mangaId) async {
+  Future<MangaEntity> getMangaDetailFromServer(
+    String serverId,
+    String mangaId,
+  ) async {
     final service = _serviceMap[serverId];
     if (service == null) {
       throw Exception('Servidor no encontrado: $serverId');
     }
-    
+
     return await service.getMangaDetail(mangaId);
   }
 
   @override
-  Future<List<String>> getChapterImagesFromServer(String serverId, String chapterId) async {
+  Future<List<String>> getChapterImagesFromServer(
+    String serverId,
+    String chapterId,
+  ) async {
     final service = _serviceMap[serverId];
     if (service == null) {
       throw Exception('Servidor no encontrado: $serverId');
     }
-    
+
     return await service.getChapterImages(chapterId);
   }
 
   @override
-  Future<List<MangaEntity>> searchMangaInServer(String serverId, String query, {int page = 1}) async {
+  Future<List<MangaEntity>> searchMangaInServer(
+    String serverId,
+    String query, {
+    int page = 1,
+  }) async {
     final service = _serviceMap[serverId];
     if (service == null) {
       throw Exception('Servidor no encontrado: $serverId');
     }
-    
+
     return await service.searchManga(query, page: page);
   }
 }

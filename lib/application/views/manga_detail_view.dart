@@ -92,11 +92,6 @@ class _MangaDetailViewState extends State<MangaDetailView> {
       }
 
       final detailedManga = await _serversService!.getMangaDetailFromServer(serverId, widget.manga.id);
-      
-      print('📚 Capítulos obtenidos del servidor: ${detailedManga.chapters.length}');
-      print('🖼️ URL de imagen del listado (widget.manga): ${widget.manga.linkImage}');
-      print('🖼️ URL de imagen del servidor (detailedManga): ${detailedManga.coverImageUrl}');
-      
       // Convertir de vuelta a MangaDetailEntity
       final detailedMangaEntity = MangaDetailEntity(
         title: detailedManga.title,
