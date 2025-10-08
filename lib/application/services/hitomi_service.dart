@@ -263,36 +263,51 @@ class HitomiService implements IMangaService {
     Map<String, dynamic> ggData,
   ) {
     try {
-      // Implementar la lógica de subdomain_from_url del common.js
+      // Implementar la lógica de subdomain_from_url del common.js de Hitomi
+      // Para AVIF: 'a' + número, para otros: 'b' + número
       String retval = hasAvif ? 'a' : 'b';
 
-      // Extraer los últimos 3 caracteres del hash como en el código original
+      // Extraer los últimos 3 caracteres del hash siguiendo el patrón del regex JS:
+      // /\/[0-9a-f]{61}([0-9a-f]{2})([0-9a-f])/
+      // Grupos: grupo1 = penúltimos 2 chars, grupo2 = último char
       final match = RegExp(r'([0-9a-f]{2})([0-9a-f])$').firstMatch(hash);
 
       if (match == null) {
-        return '${retval}1'; // Fallback
+        print('Warning: Hash does not match expected pattern: $hash');
+        return '${retval}2'; // Default a2/b2 como el más común
       }
 
-      // Convertir de hexadecimal a decimal (base 16)
-      // El formato es: último_char + penúltimos_2_chars
-      final hexPart = match.group(2)! + match.group(1)!;
-      final g = int.parse(hexPart, radix: 16);
+      // En el código JS: var g = parseInt(m[2]+m[1], b) donde b=16
+      // m[2] = último char, m[1] = penúltimos 2 chars
+      final lastChar = match.group(2)!;
+      final secondToLastChars = match.group(1)!;
+      final hexValue = lastChar + secondToLastChars; // Concatenar en orden JS
+      final g = int.parse(hexValue, radix: 16);
 
-      // La función m de gg.js devuelve 0 o 1
+      // Obtener el resultado de la función m de gg.js
       final mFunction = ggData['m'] as int Function(int);
-      final moduleResult = mFunction(g);
+      final mResult = mFunction(g);
+      final o = ggData['o'] as int;
       
-      // Debug: ver qué valor retorna m(g)
-      print('Hash: $hash, Last3: $hexPart, g: $g, m(g): $moduleResult');
+      // En Hitomi, el subdominio se calcula basándose en el resultado de m(g)
+      // El código JS usa: String.fromCharCode(97 + gg.m(g)) + base
+      // donde 97 es el código ASCII de 'a'
+      // Entonces: m(g)=0 -> 'a', m(g)=1 -> 'b', etc.
+      // 
+      // Para nuestro caso:
+      // - Si hasAvif: usamos prefijo 'a' + número del subdominio
+      // - Si no: usamos prefijo 'b' + número del subdominio
+      // El número se calcula como: 1 + m(g)
+      // Esto da: a1, a2, a3... o b1, b2, b3...
+      final subdomainNumber = 1 + mResult;
+      final subdomain = retval + subdomainNumber.toString();
       
-      // Según el código TS: return 1 + ggData.m(g)
-      final subdomainNumber = 1 + moduleResult;
-      retval = retval + subdomainNumber.toString();
+      print('Subdomain calc: hash=$hash, hex=$hexValue, g=$g, o=$o, m(g)=$mResult -> $subdomain');
 
-      return retval;
+      return subdomain;
     } catch (error) {
       print('Error calculating Hitomi subdomain: $error');
-      return hasAvif ? 'a1' : 'b1'; // Fallback
+      return hasAvif ? 'a2' : 'b2'; // Fallback al más común
     }
   }
 

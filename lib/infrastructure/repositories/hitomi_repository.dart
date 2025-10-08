@@ -414,8 +414,12 @@ class HitomiRepository implements IHitomiRepository {
       final String b = bMatch != null ? bMatch.group(1)! : '1755651602/';
 
       // Extraer el número de subdominios 'o' del código
-      final oMatch = RegExp(r'var\s+o\s*=\s*(\d+)').firstMatch(jsContent);
-      final int o = oMatch != null ? int.parse(oMatch.group(1)!) : 3;
+      // Buscar la inicialización de 'o' dentro de la función m
+      final oInFunctionMatch = RegExp(r'm:\s*function[^{]*\{[^}]*?var\s+o\s*=\s*(\d+)', dotAll: true).firstMatch(jsContent);
+      final oGlobalMatch = RegExp(r'var\s+o\s*=\s*(\d+)').firstMatch(jsContent);
+      final int o = oInFunctionMatch != null 
+          ? int.parse(oInFunctionMatch.group(1)!) 
+          : (oGlobalMatch != null ? int.parse(oGlobalMatch.group(1)!) : 2);
 
       // Función 's' - subdirectory from hash (convierte hex a decimal)
       String Function(String) s = (String hash) {
@@ -429,14 +433,17 @@ class HitomiRepository implements IHitomiRepository {
 
       // Función 'm' - module function
       // Parsear el switch statement del gg.js para obtener los casos
+      // En el código JS real:
+      // - o se inicializa en un valor (típicamente el número de subdominios - 1)
+      // - Los casos específicos hacen "o = 1; break;" (fuerzan subdominio más alto)
+      // - El default retorna o sin modificar (usa módulo o valor inicial)
       final Set<int> casesSet = {};
       final switchMatch = RegExp(r'switch\s*\(\s*g\s*\)\s*\{([\s\S]*?)\}', multiLine: true).firstMatch(jsContent);
       
       if (switchMatch != null) {
         final switchContent = switchMatch.group(1) ?? '';
-        // Extraer todos los casos que aparecen antes de "o = 1"
-        // Estos casos retornan 1, el resto (default) retorna 0
-        final casePattern = RegExp(r'case\s+(\d+):');
+        // Buscar todos los casos que aparecen en el switch
+        final casePattern = RegExp(r'case\s+(\d+):', multiLine: true);
         final cases = casePattern.allMatches(switchContent);
         
         for (final match in cases) {
@@ -444,22 +451,34 @@ class HitomiRepository implements IHitomiRepository {
           casesSet.add(caseNum);
         }
         
-        print('GG.js parsed: Found ${casesSet.length} cases for m function');
-        print('Sample cases: ${casesSet.take(10).join(", ")}');
+        print('GG.js parsed: o=$o, Found ${casesSet.length} special cases for m function');
+        print('Sample special cases: ${casesSet.take(10).join(", ")}');
       }
       
       int Function(int) m = (int g) {
-        if (o == 0) return 0;
+        // La función m del gg.js funciona exactamente así:
+        // var o = 0;
+        // switch (g) {
+        //   case 1029: ... case 3342: ... (1984 casos en total)
+        //   o = 1; break;
+        // }
+        // return o;
+        //
+        // Es decir:
+        // - Si g está en la lista de ~1984 casos especiales: retorna 1
+        // - Si g NO está en la lista: retorna 0
+        //
+        // Con subdomain = prefix + (1 + m(g)):
+        // - Casos especiales (m(g)=1) → a2/b2
+        // - Resto (m(g)=0) → a1/b1
         
-        // Si hay casos parseados, usar esa lógica
-        if (casesSet.isNotEmpty) {
-          // INVERTIDO: Si g NO está en el set de casos, retorna 1, si está retorna 0
-          // Esto es porque los casos en el switch representan excepciones
-          return casesSet.contains(g) ? 0 : 1;
+        if (casesSet.isNotEmpty && casesSet.contains(g)) {
+          // g está en los casos especiales del switch
+          return 1;
         }
         
-        // Fallback: usar módulo
-        return g % o;
+        // g NO está en los casos especiales
+        return 0;
       };
 
       return {
