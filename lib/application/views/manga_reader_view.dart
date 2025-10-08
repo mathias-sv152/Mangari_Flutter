@@ -8,6 +8,7 @@ import 'package:mangari/core/di/service_locator.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:typed_data';
 
 enum ImageLoadState {
   loading,
@@ -64,10 +65,22 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   bool _showControls = true;
   
   InAppWebViewController? _webViewController;
+  
+  // Cliente HTTP reutilizable con timeout
+  late final http.Client _httpClient;
+  
+  // Cache de imágenes en memoria para evitar múltiples descargas
+  final Map<String, Uint8List> _imageCache = {};
+  
+  // Debouncing para updateCurrentPage
+  DateTime _lastPageUpdate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
+    // Inicializar cliente HTTP
+    _httpClient = http.Client();
+    
     // Configurar la UI del sistema para mostrar las barras inicialmente
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -81,6 +94,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   
   @override
   void dispose() {
+    // Limpiar recursos
+    _httpClient.close();
+    _imageCache.clear();
+    _webViewController?.dispose();
+    
     // Restaurar la UI del sistema al salir
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -122,13 +140,19 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
 
   void _handleImageLoaded(int index) {
-    if (mounted && _imageStates.containsKey(index)) {
-      setState(() {
-        _imageStates[index]!.state = ImageLoadState.loaded;
-        _imageStates[index]!.retryCount = 0;
-        _imageStates[index]!.errorMessage = null;
-      });
-      print('✅ Imagen $index cargada correctamente');
+    if (!mounted || !_imageStates.containsKey(index)) return;
+    
+    // Actualizar estado sin setState si no es visible
+    final imageState = _imageStates[index]!;
+    if (imageState.state == ImageLoadState.loaded) return; // Ya cargada
+    
+    imageState.state = ImageLoadState.loaded;
+    imageState.retryCount = 0;
+    imageState.errorMessage = null;
+    
+    // Solo setState si es relevante para la UI (cerca de la página actual)
+    if ((index - _currentPage).abs() <= 3) {
+      setState(() {});
     }
   }
 
@@ -137,15 +161,17 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     
     final imageState = _imageStates[index]!;
     
-    print('❌ Error en imagen $index: $error (intento ${imageState.retryCount + 1}/$maxRetries)');
-    
     if (imageState.retryCount < maxRetries) {
       // Retry automático
-      setState(() {
-        imageState.state = ImageLoadState.retrying;
-        imageState.retryCount++;
-        imageState.errorMessage = 'Reintentando... (${imageState.retryCount}/$maxRetries)';
-      });
+      imageState.state = ImageLoadState.retrying;
+      imageState.retryCount++;
+      imageState.errorMessage = 'Reintentando... (${imageState.retryCount}/$maxRetries)';
+      _invalidateCountCache();
+      
+      // Solo setState si es visible
+      if ((index - _currentPage).abs() <= 3) {
+        setState(() {});
+      }
       
       // Esperar antes de reintentar
       Future.delayed(Duration(milliseconds: retryDelayMs * imageState.retryCount), () {
@@ -155,10 +181,13 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       });
     } else {
       // Falló después de todos los intentos
-      setState(() {
-        imageState.state = ImageLoadState.error;
-        imageState.errorMessage = 'Error después de $maxRetries intentos';
-      });
+      imageState.state = ImageLoadState.error;
+      imageState.errorMessage = 'Error después de $maxRetries intentos';
+      _invalidateCountCache();
+      
+      if ((index - _currentPage).abs() <= 3) {
+        setState(() {});
+      }
     }
   }
 
@@ -337,7 +366,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
              alt="Manga page $index" 
              class="manga-image"
              referrerpolicy="origin"
-             loading="lazy"
+             loading="${index < 5 ? 'eager' : 'lazy'}"
+             decoding="async"
              data-retry-count="0"
              onerror="handleImageError(this, $index)"
              onload="handleImageLoad(this, $index)" />
@@ -397,6 +427,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           image-rendering: crisp-edges;
           opacity: 0;
           transition: opacity 0.3s ease-in-out;
+          will-change: opacity;
         }
         
         .manga-image.loaded {
@@ -576,35 +607,60 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           }
         }
         
-        // Tracking de páginas
-        function updateCurrentPage() {
-          const images = document.querySelectorAll('.image-container');
-          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-          const windowHeight = window.innerHeight;
-          
-          for (let i = 0; i < images.length; i++) {
-            const rect = images[i].getBoundingClientRect();
-            const imageTop = rect.top + scrollTop;
-            const imageBottom = imageTop + rect.height;
-            
-            if (imageTop <= scrollTop + windowHeight / 2 && imageBottom >= scrollTop + windowHeight / 2) {
-              if (currentPage !== i) {
-                currentPage = i;
-                if (window.flutter_inappwebview) {
-                  window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
-                    currentPage: currentPage,
-                    totalPages: images.length
-                  }));
+        // Usar Intersection Observer para tracking eficiente
+        let updateTimeout = null;
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
+              const index = parseInt(entry.target.getAttribute('data-index'));
+              if (currentPage !== index) {
+                currentPage = index;
+                
+                // Debounce updates
+                if (updateTimeout) clearTimeout(updateTimeout);
+                updateTimeout = setTimeout(() => {
+                  if (window.flutter_inappwebview) {
+                    window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
+                      currentPage: currentPage,
+                      totalPages: document.querySelectorAll('.image-container').length
+                    }));
+                  }
+                }, 100);
+              }
+            }
+          });
+        }, {
+          threshold: [0.5],
+          rootMargin: '0px'
+        });
+        
+        // Observar todos los contenedores de imágenes
+        document.querySelectorAll('.image-container').forEach(container => {
+          observer.observe(container);
+        });
+        
+        // Precargar imágenes cercanas cuando una imagen sea visible
+        const preloadObserver = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const index = parseInt(entry.target.getAttribute('data-index'));
+              // Precargar 2 imágenes adelante
+              for (let i = 1; i <= 2; i++) {
+                const nextContainer = document.querySelector('[data-index=\"' + (index + i) + '\"]');
+                if (nextContainer) {
+                  const img = nextContainer.querySelector('img');
+                  if (img && img.loading === 'lazy') {
+                    img.loading = 'eager';
+                  }
                 }
               }
-              break;
             }
-          }
-        }
+          });
+        }, { rootMargin: '200px' });
         
-        // Event listeners
-        window.addEventListener('scroll', updateCurrentPage);
-        window.addEventListener('resize', updateCurrentPage);
+        document.querySelectorAll('.image-container').forEach(container => {
+          preloadObserver.observe(container);
+        });
         
         // Toggle controls on tap (excepto en botones)
         document.addEventListener('click', function(e) {
@@ -633,16 +689,24 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     ''';
   }
 
+  int? _cachedFailedCount;
+  int? _cachedLoadedCount;
+  
   int get _failedImagesCount {
-    return _imageStates.values
+    return _cachedFailedCount ??= _imageStates.values
         .where((state) => state.state == ImageLoadState.error)
         .length;
   }
 
   int get _loadedImagesCount {
-    return _imageStates.values
+    return _cachedLoadedCount ??= _imageStates.values
         .where((state) => state.state == ImageLoadState.loaded)
         .length;
+  }
+  
+  void _invalidateCountCache() {
+    _cachedFailedCount = null;
+    _cachedLoadedCount = null;
   }
 
   void _navigateToPage(int pageIndex) {
@@ -961,11 +1025,20 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         controller.addJavaScriptHandler(
           handlerName: 'PageTracker',
           callback: (args) {
+            final now = DateTime.now();
+            // Debouncing: solo actualizar si han pasado 100ms
+            if (now.difference(_lastPageUpdate).inMilliseconds < 100) return;
+            
             final message = args[0] as String;
             final pageData = jsonDecode(message);
-            setState(() {
-              _currentPage = pageData['currentPage'] ?? 0;
-            });
+            final newPage = pageData['currentPage'] ?? 0;
+            
+            if (_currentPage != newPage) {
+              _lastPageUpdate = now;
+              setState(() {
+                _currentPage = newPage;
+              });
+            }
           },
         );
         
@@ -1024,40 +1097,57 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         print('WebView Console: ${consoleMessage.message}');
       },
       shouldInterceptRequest: (controller, request) async {
-        // Interceptar todas las peticiones de recursos
         final url = request.url.toString();
         
-        // Si es una imagen de nuestras URLs, agregar el referer
-        if (_images.any((imageUrl) => url.contains(imageUrl) || imageUrl.contains(url))) {
-          print('🔗 Interceptando petición de imagen: $url');
-          
-          try {
-            // Realizar la petición con el referer correcto
-            final response = await http.get(
-              Uri.parse(url),
-              headers: {
-                'Referer': widget.referer,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              },
-            );
-            
-            if (response.statusCode == 200) {
-              print('✅ Imagen cargada correctamente: $url');
-              // Retornar la respuesta con los datos de la imagen
-              return WebResourceResponse(
-                contentType: response.headers['content-type'] ?? 'image/jpeg',
-                data: response.bodyBytes,
-                statusCode: response.statusCode,
-              );
-            } else {
-              print('❌ Error al cargar imagen: ${response.statusCode}');
-            }
-          } catch (e) {
-            print('❌ Error en petición de imagen: $e');
-          }
+        // Solo interceptar imágenes de manga
+        if (!_images.any((imageUrl) => url.contains(imageUrl) || imageUrl.contains(url))) {
+          return null;
         }
         
-        // Dejar que otras peticiones pasen normalmente
+        try {
+          // Verificar cache primero
+          if (_imageCache.containsKey(url)) {
+            return WebResourceResponse(
+              contentType: 'image/jpeg',
+              data: _imageCache[url]!,
+              statusCode: 200,
+            );
+          }
+          
+          // Realizar petición con timeout y el cliente reutilizable
+          final response = await _httpClient
+              .get(
+                Uri.parse(url),
+                headers: {
+                  'Referer': widget.referer,
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                },
+              )
+              .timeout(const Duration(seconds: 15));
+          
+          if (response.statusCode == 200) {
+            // Cachear solo si el tamaño es razonable (< 5MB)
+            if (response.bodyBytes.length < 5 * 1024 * 1024) {
+              _imageCache[url] = Uint8List.fromList(response.bodyBytes);
+              
+              // Limitar cache a 50 imágenes para evitar OOM
+              if (_imageCache.length > 50) {
+                final firstKey = _imageCache.keys.first;
+                _imageCache.remove(firstKey);
+              }
+            }
+            
+            return WebResourceResponse(
+              contentType: response.headers['content-type'] ?? 'image/jpeg',
+              data: response.bodyBytes,
+              statusCode: response.statusCode,
+            );
+          }
+        } catch (e) {
+          // Silenciar errores de timeout/network - dejar que el retry maneje
+        }
+        
         return null;
       },
     );
