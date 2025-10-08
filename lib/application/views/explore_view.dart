@@ -296,18 +296,35 @@ class _ExploreViewState extends State<ExploreView> {
             children: [
               Row(
                 children: [
-                  Container(
+                    Container(
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
                       color: DraculaTheme.purple.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(
-                      Icons.web,
-                      color: DraculaTheme.purple,
-                      size: 24,
-                    ),
+                    child: server.iconUrl != null && server.iconUrl!.isNotEmpty
+                      ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          server.iconUrl!,
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.web,
+                            color: DraculaTheme.purple,
+                            size: 24,
+                          );
+                          },
+                        ),
+                        )
+                      : const Icon(
+                        Icons.web,
+                        color: DraculaTheme.purple,
+                        size: 24,
+                        ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
