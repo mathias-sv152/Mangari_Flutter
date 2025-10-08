@@ -201,6 +201,11 @@ class HitomiRepository implements IHitomiRepository {
               firstUrl = firstUrl.replaceAll('tn.hitomi.la', 'atn.gold-usergeneratedcontent.net');
             }
             
+            // Optimizar thumbnail: reemplazar avifbigtn por avifsmallbigtn
+            if (firstUrl.contains('avifbigtn')) {
+              firstUrl = firstUrl.replaceAll('avifbigtn', 'avifsmallbigtn');
+            }
+            
             // Ahora agregar el protocolo si es necesario
             if (firstUrl.startsWith('//')) {
               linkImage = 'https:$firstUrl';
@@ -225,6 +230,11 @@ class HitomiRepository implements IHitomiRepository {
               dataSrc = dataSrc.replaceAll('//tn.hitomi.la', '//atn.gold-usergeneratedcontent.net');
             } else if (dataSrc.contains('tn.hitomi.la')) {
               dataSrc = dataSrc.replaceAll('tn.hitomi.la', 'atn.gold-usergeneratedcontent.net');
+            }
+            
+            // Optimizar thumbnail: reemplazar avifbigtn por avifsmallbigtn
+            if (dataSrc.contains('avifbigtn')) {
+              dataSrc = dataSrc.replaceAll('avifbigtn', 'avifsmallbigtn');
             }
             
             // Ahora agregar el protocolo si es necesario
