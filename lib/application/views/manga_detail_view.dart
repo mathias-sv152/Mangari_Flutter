@@ -85,8 +85,8 @@ class _MangaDetailViewState extends State<MangaDetailView> {
 
       // Determinar el servidor basado en el service del manga
       String serverId = widget.manga.service.toLowerCase();
-      if (serverId == 'mangadx' || serverId == 'mangadex') {
-        serverId = 'mangadx';
+      if (serverId == 'mangadex') {
+        serverId = 'mangadex';
       } else if (serverId == 'tmo') {
         serverId = 'tmo';
       }
