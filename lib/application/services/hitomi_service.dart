@@ -234,9 +234,13 @@ class HitomiService implements IMangaService {
           ? 'avif'
           : name.split('.').last.toLowerCase();
 
-      // Implementar url_from_url_from_hash basado en el código de Hitomi
+      // Usar la función s de ggData para obtener el subdirectorio
       final sFunction = ggData['s'] as String Function(String);
-      final fullPath = ggData['b'] + sFunction(hash) + hash;
+      final basePath = ggData['b'] as String;
+      
+      // Construir el path completo: basePath + subdirectory + hash
+      // Ejemplo: 1759953601/ + 864/ + hash
+      final fullPath = basePath + sFunction(hash) + hash;
 
       // Calcular subdominio usando la función real de Hitomi
       final subdomain = _getHitomiSubdomain(hash, hasAvif, ggData);
@@ -269,11 +273,19 @@ class HitomiService implements IMangaService {
       }
 
       // Convertir de hexadecimal a decimal (base 16)
-      final g = int.parse(match.group(2)! + match.group(1)!, radix: 16);
+      // El formato es: último_char + penúltimos_2_chars
+      final hexPart = match.group(2)! + match.group(1)!;
+      final g = int.parse(hexPart, radix: 16);
 
-      // La función m de gg.js devuelve el módulo
+      // La función m de gg.js devuelve 0 o 1
       final mFunction = ggData['m'] as int Function(int);
-      final subdomainNumber = mFunction(g) == 0 ? 2 : 1;
+      final moduleResult = mFunction(g);
+      
+      // Debug: ver qué valor retorna m(g)
+      print('Hash: $hash, Last3: $hexPart, g: $g, m(g): $moduleResult');
+      
+      // Según el código TS: return 1 + ggData.m(g)
+      final subdomainNumber = 1 + moduleResult;
       retval = retval + subdomainNumber.toString();
 
       return retval;

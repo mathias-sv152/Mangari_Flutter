@@ -91,11 +91,11 @@ class _MangaDetailViewState extends State<MangaDetailView> {
         serverId = 'tmo';
       }
 
-      final detailedManga = await _serversService!.getMangaDetailFromServer(serverId, widget.manga.id);
-      // Convertir de vuelta a MangaDetailEntity
-      final detailedMangaEntity = MangaDetailEntity(
-        title: detailedManga.title,
-        linkImage: detailedManga.coverImageUrl ?? widget.manga.linkImage,
+        final detailedManga = await _serversService!.getMangaDetailFromServer(serverId, widget.manga.id);
+        // Convertir de vuelta a MangaDetailEntity
+        final detailedMangaEntity = MangaDetailEntity(
+          title: detailedManga.title,
+          linkImage: (detailedManga.coverImageUrl?.isEmpty ?? true) ? widget.manga.linkImage : detailedManga.coverImageUrl!,
         link: widget.manga.link,
         bookType: widget.manga.bookType,
         demography: widget.manga.demography,
@@ -109,7 +109,7 @@ class _MangaDetailViewState extends State<MangaDetailView> {
         source: detailedManga.serverSource,
         referer: detailedManga.referer ?? widget.manga.referer,
       );
-      
+
       setState(() {
         _mangaDetail = detailedMangaEntity;
         _isLoading = false;

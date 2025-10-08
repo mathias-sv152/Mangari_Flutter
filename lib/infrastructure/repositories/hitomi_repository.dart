@@ -392,26 +392,56 @@ class HitomiRepository implements IHitomiRepository {
 
   Map<String, dynamic>? _parseGGJS(String jsContent) {
     try {
-      // Extraer la variable 'o' que contiene el número de subdominios
+      // Extraer el valor de 'b' (timestamp)
+      final bMatch = RegExp(r"b:\s*'([^']+)'").firstMatch(jsContent);
+      final String b = bMatch != null ? bMatch.group(1)! : '1755651602/';
+
+      // Extraer el número de subdominios 'o' del código
       final oMatch = RegExp(r'var\s+o\s*=\s*(\d+)').firstMatch(jsContent);
       final int o = oMatch != null ? int.parse(oMatch.group(1)!) : 3;
 
-      // Extraer el valor de 'b' (base path)
-      String b = '';
-      final adaptMatch = RegExp(r"case\s+(\d+):\s*return\s+'([^']+)'").firstMatch(jsContent);
-      if (adaptMatch != null) {
-        b = adaptMatch.group(2) ?? '';
-      }
-
-      // Función 's' - subdirectory from hash
+      // Función 's' - subdirectory from hash (convierte hex a decimal)
       String Function(String) s = (String hash) {
-        final m = RegExp(r'(..)(.)$').firstMatch(hash);
-        if (m == null) return '';
-        return m.group(2)! + '/' + m.group(1)! + '/';
+        final match = RegExp(r'(..)(.)$').firstMatch(hash);
+        if (match == null) return '0/';
+        // Convertir de hex a decimal como en el código TS
+        final hexValue = match.group(2)! + match.group(1)!;
+        final decimalValue = int.parse(hexValue, radix: 16);
+        return '$decimalValue/';
       };
 
       // Función 'm' - module function
+      // Parsear el switch statement del gg.js para obtener los casos
+      final Set<int> casesSet = {};
+      final switchMatch = RegExp(r'switch\s*\(\s*g\s*\)\s*\{([\s\S]*?)\}', multiLine: true).firstMatch(jsContent);
+      
+      if (switchMatch != null) {
+        final switchContent = switchMatch.group(1) ?? '';
+        // Extraer todos los casos que aparecen antes de "o = 1"
+        // Estos casos retornan 1, el resto (default) retorna 0
+        final casePattern = RegExp(r'case\s+(\d+):');
+        final cases = casePattern.allMatches(switchContent);
+        
+        for (final match in cases) {
+          final caseNum = int.parse(match.group(1)!);
+          casesSet.add(caseNum);
+        }
+        
+        print('GG.js parsed: Found ${casesSet.length} cases for m function');
+        print('Sample cases: ${casesSet.take(10).join(", ")}');
+      }
+      
       int Function(int) m = (int g) {
+        if (o == 0) return 0;
+        
+        // Si hay casos parseados, usar esa lógica
+        if (casesSet.isNotEmpty) {
+          // INVERTIDO: Si g NO está en el set de casos, retorna 1, si está retorna 0
+          // Esto es porque los casos en el switch representan excepciones
+          return casesSet.contains(g) ? 0 : 1;
+        }
+        
+        // Fallback: usar módulo
         return g % o;
       };
 
