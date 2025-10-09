@@ -289,17 +289,17 @@ class HitomiService implements IMangaService {
       final mResult = mFunction(g);
       final o = ggData['o'] as int;
       
-      // En Hitomi, el subdominio se calcula basándose en el resultado de m(g)
-      // El código JS usa: String.fromCharCode(97 + gg.m(g)) + base
-      // donde 97 es el código ASCII de 'a'
-      // Entonces: m(g)=0 -> 'a', m(g)=1 -> 'b', etc.
+      // En Hitomi, el subdominio se calcula de forma INVERSA:
+      // La función m(g) retorna 0 o 1, pero el subdominio se calcula al revés
+      // - m(g)=0 → subdominio 2 (a2/b2)
+      // - m(g)=1 → subdominio 1 (a1/b1)
       // 
-      // Para nuestro caso:
-      // - Si hasAvif: usamos prefijo 'a' + número del subdominio
-      // - Si no: usamos prefijo 'b' + número del subdominio
-      // El número se calcula como: 1 + m(g)
-      // Esto da: a1, a2, a3... o b1, b2, b3...
-      final subdomainNumber = 1 + mResult;
+      // Esto se confirma con los URLs reales:
+      // - g=3926, m(g)=1 → a1 (no a2)
+      // - g=3173, m(g)=0 → a2 (no a1)
+      // 
+      // Fórmula correcta: 2 - m(g)
+      final subdomainNumber = 2 - mResult;
       final subdomain = retval + subdomainNumber.toString();
       
       print('Subdomain calc: hash=$hash, hex=$hexValue, g=$g, o=$o, m(g)=$mResult -> $subdomain');
