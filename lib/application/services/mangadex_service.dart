@@ -1,3 +1,5 @@
+import 'package:mangari/domain/entities/filter_entity.dart';
+
 import '../interfaces/i_manga_service.dart';
 import '../../domain/interfaces/i_mangadex_reporitory.dart';
 
@@ -57,17 +59,17 @@ class MangaDexService implements IMangaService {
   Future<List<String>> getChapterImages(String chapterId) async {
     try {
       final response = await _repository.getChapterDetail(chapterId);
-      
+
       final chapterHash = response['chapter']['hash'] as String;
       final chapterBaseUrl = response['baseUrl'] as String;
       final chapterImages = response['chapter']['data'] as List<dynamic>;
-      
+
       final images = <String>[];
       for (final image in chapterImages) {
         final imageUrl = '$chapterBaseUrl/data/$chapterHash/$image';
         images.add(imageUrl);
       }
-      
+
       return images;
     } catch (e) {
       throw Exception('Error en MangaDexService getChapterImages: $e');
@@ -80,7 +82,7 @@ class MangaDexService implements IMangaService {
     for (int index = 0; index < mangaData.length; index++) {
       try {
         final item = mangaData[index] as Map<String, dynamic>;
-        
+
         // Extraer título principal
         final title = _extractTitle(
           item['attributes']['title'] as Map<String, dynamic>?,
@@ -99,9 +101,10 @@ class MangaDexService implements IMangaService {
           ),
           coverImageUrl: linkImage.isNotEmpty ? linkImage : null,
           authors: [], // Se poblará en getMangaDetail
-          genres: _extractGenres(
-            item['attributes']['tags'] as List<dynamic>?,
-          ).map((g) => g.text).toList(),
+          genres:
+              _extractGenres(
+                item['attributes']['tags'] as List<dynamic>?,
+              ).map((g) => g.text).toList(),
           status: _translateStatus(
             item['attributes']['status'] as String? ?? '',
           ),
@@ -129,7 +132,7 @@ class MangaDexService implements IMangaService {
       final linkImage = _extractCoverImage(mangaDetailData);
       print('🔍 MangaDex _formatMangaDetail - Manga ID: $mangaId');
       print('🔍 MangaDex _formatMangaDetail - Link Image extraída: $linkImage');
-      
+
       return MangaEntity(
         id: mangaId,
         title: _extractTitle(
@@ -140,12 +143,13 @@ class MangaDexService implements IMangaService {
           mangaDetailData['attributes']['description'] as Map<String, dynamic>?,
         ),
         coverImageUrl: linkImage,
-        authors: [_extractAuthor(
-          mangaDetailData['relationships'] as List<dynamic>?,
-        )],
-        genres: _extractGenres(
-          mangaDetailData['attributes']['tags'] as List<dynamic>?,
-        ).map((g) => g.text).toList(),
+        authors: [
+          _extractAuthor(mangaDetailData['relationships'] as List<dynamic>?),
+        ],
+        genres:
+            _extractGenres(
+              mangaDetailData['attributes']['tags'] as List<dynamic>?,
+            ).map((g) => g.text).toList(),
         status: _translateStatus(
           mangaDetailData['attributes']['status'] as String? ?? '',
         ),
@@ -177,14 +181,15 @@ class MangaDexService implements IMangaService {
       for (final chapterData in chaptersData) {
         final chapterMap = chapterData as Map<String, dynamic>;
         final attributes = chapterMap['attributes'] as Map<String, dynamic>;
-        
+
         final chapterNumber = attributes['chapter'] as String? ?? '0';
         final volume = attributes['volume'] as String? ?? '';
 
         // Crear una clave única para el capítulo
-        final chapterKey = volume.isNotEmpty
-            ? 'Vol.$volume Ch.$chapterNumber'
-            : 'Ch.$chapterNumber';
+        final chapterKey =
+            volume.isNotEmpty
+                ? 'Vol.$volume Ch.$chapterNumber'
+                : 'Ch.$chapterNumber';
 
         if (!chapterGroups.containsKey(chapterKey)) {
           chapterGroups[chapterKey] = [];
@@ -196,7 +201,8 @@ class MangaDexService implements IMangaService {
       // Convertir grupos en objetos ChapterEntity
       chapterGroups.forEach((chapterKey, chapterGroup) {
         final firstChapter = chapterGroup[0];
-        final firstAttributes = firstChapter['attributes'] as Map<String, dynamic>;
+        final firstAttributes =
+            firstChapter['attributes'] as Map<String, dynamic>;
 
         // Crear título del capítulo
         String chapterTitle = chapterKey;
@@ -210,26 +216,29 @@ class MangaDexService implements IMangaService {
 
         for (final chapterMap in chapterGroup) {
           final relationships = chapterMap['relationships'] as List<dynamic>?;
-          
+
           // Extraer grupos de traducción
-          final scanlationGroups = relationships
-              ?.where((rel) {
+          final scanlationGroups =
+              relationships?.where((rel) {
                 final relMap = rel as Map<String, dynamic>;
                 return relMap['type'] == 'scanlation_group';
-              })
-              .toList() ?? [];
+              }).toList() ??
+              [];
 
           if (scanlationGroups.isNotEmpty) {
             for (final group in scanlationGroups) {
               final groupMap = group as Map<String, dynamic>;
-              final attributes = groupMap['attributes'] as Map<String, dynamic>?;
-              final editorialName = attributes?['name'] as String? ?? 'Desconocido';
+              final attributes =
+                  groupMap['attributes'] as Map<String, dynamic>?;
+              final editorialName =
+                  attributes?['name'] as String? ?? 'Desconocido';
 
               // Crear link para leer el capítulo
               final editorialLink = chapterMap['id'] as String;
 
               // Fecha de publicación
-              final chapterAttributes = chapterMap['attributes'] as Map<String, dynamic>;
+              final chapterAttributes =
+                  chapterMap['attributes'] as Map<String, dynamic>;
               final dateRelease = _formatDate(
                 chapterAttributes['publishAt'] as String?,
               );
@@ -244,7 +253,8 @@ class MangaDexService implements IMangaService {
             }
           } else {
             // Si no hay grupos de traducción, crear una editorial genérica
-            final chapterAttributes = chapterMap['attributes'] as Map<String, dynamic>;
+            final chapterAttributes =
+                chapterMap['attributes'] as Map<String, dynamic>;
             editorials.add(
               EditorialEntity(
                 editorialName: 'MangaDex',
@@ -297,12 +307,12 @@ class MangaDexService implements IMangaService {
 
     try {
       final date = DateTime.parse(dateString);
-      
+
       // Formatear fecha como "dd/MM/yyyy"
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
       final year = date.year.toString();
-      
+
       return '$day/$month/$year';
     } catch (e) {
       print('Error formateando fecha: $e');
@@ -355,8 +365,10 @@ class MangaDexService implements IMangaService {
     try {
       print('🔍 _extractCoverImage - Manga ID: ${item['id']}');
       final relationships = item['relationships'] as List<dynamic>?;
-      print('🔍 _extractCoverImage - Relationships: ${relationships?.length ?? 0}');
-      
+      print(
+        '🔍 _extractCoverImage - Relationships: ${relationships?.length ?? 0}',
+      );
+
       if (relationships == null) {
         print('❌ _extractCoverImage - No hay relationships');
         return '';
@@ -373,14 +385,17 @@ class MangaDexService implements IMangaService {
         final fileName = coverArtMap['attributes']?['fileName'] as String?;
         print('🔍 _extractCoverImage - fileName: $fileName');
         if (fileName != null) {
-          final imageUrl = 'https://uploads.mangadex.org/covers/${item['id']}/$fileName.256.jpg';
+          final imageUrl =
+              'https://uploads.mangadex.org/covers/${item['id']}/$fileName.256.jpg';
           print('✅ _extractCoverImage - URL generada: $imageUrl');
           return imageUrl;
         } else {
           print('❌ _extractCoverImage - fileName es null');
         }
       } else {
-        print('❌ _extractCoverImage - No se encontró cover_art en relationships');
+        print(
+          '❌ _extractCoverImage - No se encontró cover_art en relationships',
+        );
       }
 
       return '';
@@ -406,7 +421,8 @@ class MangaDexService implements IMangaService {
 
     // Preferir descripción en español
     if (descriptionObj['es'] != null) return descriptionObj['es'] as String;
-    if (descriptionObj['es-la'] != null) return descriptionObj['es-la'] as String;
+    if (descriptionObj['es-la'] != null)
+      return descriptionObj['es-la'] as String;
 
     // Si no hay español, usar inglés
     if (descriptionObj['en'] != null) return descriptionObj['en'] as String;
@@ -426,16 +442,18 @@ class MangaDexService implements IMangaService {
     final genres = <GenreEntity>[];
 
     // Filtrar solo los tags de género
-    final genreTags = tags.where((tag) {
-      final tagMap = tag as Map<String, dynamic>;
-      final group = tagMap['attributes']['group'] as String;
-      return group == 'genre' || group == 'theme';
-    }).toList();
+    final genreTags =
+        tags.where((tag) {
+          final tagMap = tag as Map<String, dynamic>;
+          final group = tagMap['attributes']['group'] as String;
+          return group == 'genre' || group == 'theme';
+        }).toList();
 
     for (final tag in genreTags) {
       final tagMap = tag as Map<String, dynamic>;
       final genreName = tagMap['attributes']['name']['en'] as String;
-      final genreHref = 'https://MangaDex.org/search?includedTags=${tagMap['id']}';
+      final genreHref =
+          'https://MangaDex.org/search?includedTags=${tagMap['id']}';
       genres.add(GenreEntity(text: genreName, href: genreHref));
     }
 
@@ -447,13 +465,11 @@ class MangaDexService implements IMangaService {
 
     try {
       // Buscar autor en las relaciones
-      final authorRelation = relationships.firstWhere(
-        (rel) {
-          final relMap = rel as Map<String, dynamic>;
-          return relMap['type'] == 'author' && relMap['attributes']?['name'] != null;
-        },
-        orElse: () => null,
-      );
+      final authorRelation = relationships.firstWhere((rel) {
+        final relMap = rel as Map<String, dynamic>;
+        return relMap['type'] == 'author' &&
+            relMap['attributes']?['name'] != null;
+      }, orElse: () => null);
 
       if (authorRelation != null) {
         final authorMap = authorRelation as Map<String, dynamic>;
@@ -461,13 +477,11 @@ class MangaDexService implements IMangaService {
       }
 
       // Si no hay autor, buscar artista
-      final artistRelation = relationships.firstWhere(
-        (rel) {
-          final relMap = rel as Map<String, dynamic>;
-          return relMap['type'] == 'artist' && relMap['attributes']?['name'] != null;
-        },
-        orElse: () => null,
-      );
+      final artistRelation = relationships.firstWhere((rel) {
+        final relMap = rel as Map<String, dynamic>;
+        return relMap['type'] == 'artist' &&
+            relMap['attributes']?['name'] != null;
+      }, orElse: () => null);
 
       if (artistRelation != null) {
         final artistMap = artistRelation as Map<String, dynamic>;
@@ -479,5 +493,28 @@ class MangaDexService implements IMangaService {
       print('Error extrayendo autor: $e');
       return 'Autor desconocido';
     }
+  }
+
+  @override
+  Future<List<FilterGroupEntity>> getFilters() async {
+    // MangaDex no tiene filtros específicos
+    return [];
+  }
+
+  @override
+  Future<List<MangaEntity>> applyFilter(
+    int page,
+    Map<String, dynamic> selectedFilters,
+  ) async {
+    // MangaDex no tiene filtros específicos, retornamos la lista normal
+    return await getAllMangas(page: page, limit: 20);
+  }
+
+  @override
+  Map<String, dynamic> prepareFilterParams(
+    Map<String, dynamic> selectedFilters,
+  ) {
+    // Mangadex no tiene filtros específicos
+    return {};
   }
 }

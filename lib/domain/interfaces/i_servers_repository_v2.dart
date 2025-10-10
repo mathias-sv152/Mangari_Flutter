@@ -1,5 +1,6 @@
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 
 /// Interfaz del repositorio de Servers que maneja múltiples servicios de manga
 abstract class IServersRepositoryV2 {
@@ -17,4 +18,10 @@ abstract class IServersRepositoryV2 {
   
   /// Busca mangas en un servidor específico
   Future<List<MangaEntity>> searchMangaInServer(String serverId, String query, {int page = 1});
+  
+  /// Obtiene los filtros disponibles para un servidor específico
+  Future<List<FilterGroupEntity>> getFiltersForServer(String serverId);
+  
+  /// Aplica filtros en un servidor específico
+  Future<List<MangaEntity>> applyFiltersInServer(String serverId, int page, Map<String, dynamic> selectedFilters);
 }

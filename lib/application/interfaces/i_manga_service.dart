@@ -1,4 +1,5 @@
 import 'package:mangari/domain/entities/manga_entity.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 
 /// Interfaz compartida para todos los servicios de manga
 /// Define el contrato que deben cumplir todos los servidores de manga
@@ -14,6 +15,27 @@ abstract class IMangaService {
   
   /// Busca manga por título
   Future<List<MangaEntity>> searchManga(String query, {int page = 1});
+  
+  /// Obtiene los filtros disponibles para este servidor
+  Future<List<FilterGroupEntity>> getFilters();
+  
+  /// Aplica filtros a la búsqueda de mangas
+  /// [page] - Número de página
+  /// [selectedFilters] - Mapa con los filtros seleccionados
+  /// El formato del mapa depende de cada servidor, pero generalmente:
+  /// {
+  ///   'selectedGenres': [1, 2, 3], // Lista de IDs de géneros
+  ///   'selectedType': 'manga', // Tipo de manga
+  ///   'selectedStatus': 'publishing', // Estado
+  ///   'orderBy': 'likes_count', // Campo de ordenamiento
+  ///   'orderDir': 'desc', // Dirección de ordenamiento
+  ///   'searchText': 'texto' // Texto de búsqueda opcional
+  /// }
+  Future<List<MangaEntity>> applyFilter(int page, Map<String, dynamic> selectedFilters);
+  
+  /// Prepara los parámetros de filtro según el formato del servidor
+  /// Convierte el formato genérico de filtros al formato específico del servidor
+  Map<String, dynamic> prepareFilterParams(Map<String, dynamic> selectedFilters);
   
   /// Obtiene el nombre identificador del servidor
   String get serverName;

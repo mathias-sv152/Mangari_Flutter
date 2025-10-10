@@ -60,4 +60,79 @@ class TmoRepository implements ITmoRepository {
       throw Exception('Error in TmoRepository getChapterDetail: $error');
     }
   }
+
+  @override
+  Future<String> searchMangasByTitle(String searchText, int page) async {
+    try {
+      final encodedQuery = Uri.encodeComponent(searchText);
+      final url = "$_baseUrl/library?order_item=likes_count&order_dir=desc&title=$encodedQuery&_pg=1&page=$page&filter_by=title&demography=&translation_status=&webcomic=&yonkoma=&amateur=&erotic=";
+      
+      final response = await _httpClient.get(Uri.parse(url));
+      
+      if (response.statusCode != 200) {
+        throw Exception('Error searching mangas: ${response.reasonPhrase}');
+      }
+      
+      return response.body;
+    } catch (error) {
+      throw Exception('Error in TmoRepository searchMangasByTitle: $error');
+    }
+  }
+
+  @override
+  Future<String> applyFilter({
+    required int page,
+    required List<int> selectedGenres,
+    String? selectedType,
+    String? selectedStatus,
+    String? orderBy,
+    String? orderDir,
+    String? searchText,
+  }) async {
+    try {
+      // Construir la URL base para el filtro
+      String baseUrl = '$_baseUrl/library?';
+
+      // Añadir parámetros de ordenamiento
+      baseUrl += 'order_item=${orderBy ?? 'likes_count'}&order_dir=${orderDir ?? 'desc'}';
+
+      // Añadir parámetros de búsqueda si existe searchText
+      if (searchText != null && searchText.isNotEmpty) {
+        final encodedQuery = Uri.encodeComponent(searchText);
+        baseUrl += '&title=$encodedQuery';
+      } else {
+        baseUrl += '&title=';
+      }
+
+      // Añadir página y otros parámetros comunes
+      baseUrl += '&_pg=1&page=$page';
+      baseUrl += '&filter_by=title&demography=&translation_status=&webcomic=&yonkoma=&amateur=&erotic=';
+
+      // Añadir géneros seleccionados
+      if (selectedGenres.isNotEmpty) {
+        final genresQuery = selectedGenres.map((genre) => 'genders[]=$genre').join('&');
+        baseUrl += '&$genresQuery';
+      }
+
+      // Añadir tipo seleccionado
+      if (selectedType != null && selectedType.isNotEmpty) {
+        baseUrl += '&type=$selectedType';
+      }
+
+      // Añadir estado seleccionado
+      if (selectedStatus != null && selectedStatus.isNotEmpty) {
+        baseUrl += '&status=$selectedStatus';
+      }
+
+      final response = await _httpClient.get(Uri.parse(baseUrl));
+      
+      if (response.statusCode != 200) {
+        throw Exception('Error applying filters: ${response.reasonPhrase}');
+      }
+      
+      return response.body;
+    } catch (error) {
+      throw Exception('Error in TmoRepository applyFilter: $error');
+    }
+  }
 }

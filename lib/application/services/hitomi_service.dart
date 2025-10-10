@@ -1,4 +1,5 @@
 import 'package:mangari/application/interfaces/i_manga_service.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/entities/chapter_entity.dart';
 import 'package:mangari/domain/entities/editorial_entity.dart';
@@ -11,7 +12,7 @@ class HitomiService implements IMangaService {
   final Map<int, Map<String, dynamic>> _galleryCache = {};
 
   HitomiService({required IHitomiRepository hitomiRepository})
-      : _hitomiRepository = hitomiRepository;
+    : _hitomiRepository = hitomiRepository;
 
   @override
   String get serverName => 'Hitomi';
@@ -147,11 +148,15 @@ class HitomiService implements IMangaService {
     return null;
   }
 
-  ChapterEntity _createSingleChapter(Map<String, dynamic> gallery, String mangaId) {
+  ChapterEntity _createSingleChapter(
+    Map<String, dynamic> gallery,
+    String mangaId,
+  ) {
     // En Hitomi, cada galería es una obra completa
-    final filesCount = gallery.containsKey('files') && gallery['files'] is List
-        ? (gallery['files'] as List).length
-        : 0;
+    final filesCount =
+        gallery.containsKey('files') && gallery['files'] is List
+            ? (gallery['files'] as List).length
+            : 0;
 
     final chapterTitle = filesCount > 0 ? 'Leer ($filesCount páginas)' : 'Leer';
 
@@ -205,7 +210,9 @@ class HitomiService implements IMangaService {
       final files = gallery['files'] as List;
 
       for (final file in files) {
-        if (file is Map && file.containsKey('name') && file.containsKey('hash')) {
+        if (file is Map &&
+            file.containsKey('name') &&
+            file.containsKey('hash')) {
           final fileMap = Map<String, dynamic>.from(file);
           final imageUrl = _buildHitomiImageUrl(galleryId, fileMap, ggData);
           if (imageUrl != null) {
@@ -232,14 +239,12 @@ class HitomiService implements IMangaService {
       final hasAvif = file['hasavif'] == 1 || file['hasavif'] == true;
       final name = file['name'] as String;
 
-      final extension = hasAvif
-          ? 'avif'
-          : name.split('.').last.toLowerCase();
+      final extension = hasAvif ? 'avif' : name.split('.').last.toLowerCase();
 
       // Usar la función s de ggData para obtener el subdirectorio
       final sFunction = ggData['s'] as String Function(String);
       final basePath = ggData['b'] as String;
-      
+
       // Construir el path completo: basePath + subdirectory + hash
       // Ejemplo: 1759953601/ + 864/ + hash
       final fullPath = basePath + sFunction(hash) + hash;
@@ -248,7 +253,8 @@ class HitomiService implements IMangaService {
       final subdomain = _getHitomiSubdomain(hash, hasAvif, ggData);
 
       // Construir URL final
-      final imageUrl = 'https://$subdomain.gold-usergeneratedcontent.net/$fullPath.$extension';
+      final imageUrl =
+          'https://$subdomain.gold-usergeneratedcontent.net/$fullPath.$extension';
 
       print('Built Hitomi image URL for $name: $imageUrl');
       return imageUrl;
@@ -284,29 +290,32 @@ class HitomiService implements IMangaService {
       // m[1] = penúltimos 2 chars, m[2] = último char
       final secondToLastChars = match.group(1)!;
       final lastChar = match.group(2)!;
-      final hexValue = lastChar + secondToLastChars; // Concatenar: último + penúltimos
+      final hexValue =
+          lastChar + secondToLastChars; // Concatenar: último + penúltimos
       final g = int.parse(hexValue, radix: 16);
 
       // Obtener valores DINÁMICOS de gg.js
       final mFunction = ggData['m'] as int Function(int);
       final mResult = mFunction(g);
       final isInverted = ggData['isInverted'] as bool? ?? false;
-      
+
       // Del common.js: retval = retval + (1 + gg.m(g))
       // La función m(g) puede comportarse de dos formas:
-      // 
+      //
       // MODO 1 - Normal (oInitial=0, oSwitch=1):
       //   - m(g) = 0 (default) → subdomain = 1 + 0 = 1 → a1/b1
       //   - m(g) = 1 (special) → subdomain = 1 + 1 = 2 → a2/b2
-      // 
+      //
       // MODO 2 - INVERTIDO (oInitial=1, oSwitch=0):
       //   - m(g) = 1 (default) → subdomain = 1 + 1 = 2 → a2/b2
       //   - m(g) = 0 (special) → subdomain = 1 + 0 = 1 → a1/b1
       final subdomainNumber = 1 + mResult;
       final subdomain = retval + subdomainNumber.toString();
-      
+
       final behavior = isInverted ? 'INVERTED' : 'normal';
-      print('🌐 [$behavior] hash=${hash.substring(hash.length - 3)}, g=$g, m(g)=$mResult → $subdomain');
+      print(
+        '🌐 [$behavior] hash=${hash.substring(hash.length - 3)}, g=$g, m(g)=$mResult → $subdomain',
+      );
 
       return subdomain;
     } catch (error) {
@@ -326,5 +335,28 @@ class HitomiService implements IMangaService {
       print('Error en HitomiService searchManga: $error');
       return [];
     }
+  }
+
+  @override
+  Future<List<FilterGroupEntity>> getFilters() async {
+    // Hitomi no tiene filtros específicos
+    return [];
+  }
+
+  @override
+  Future<List<MangaEntity>> applyFilter(
+    int page,
+    Map<String, dynamic> selectedFilters,
+  ) async {
+    // Hitomi no tiene filtros específicos, retornamos la lista normal
+    return await getAllMangas(page: page, limit: 20);
+  }
+
+  @override
+  Map<String, dynamic> prepareFilterParams(
+    Map<String, dynamic> selectedFilters,
+  ) {
+    // Hitomi no tiene filtros específicos
+    return {};
   }
 }

@@ -1,5 +1,6 @@
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 
 /// Servicio de aplicación para Servers V2
@@ -67,5 +68,25 @@ class ServersServiceV2 {
     }
   }
 
-  
+  /// Obtiene los filtros disponibles para un servidor específico
+  Future<List<FilterGroupEntity>> getFiltersForServer(String serverId) async {
+    try {
+      return await _repository.getFiltersForServer(serverId);
+    } catch (e) {
+      throw Exception('Error al obtener filtros del servidor $serverId: $e');
+    }
+  }
+
+  /// Aplica filtros en un servidor específico
+  Future<List<MangaEntity>> applyFiltersInServer(
+    String serverId, 
+    int page, 
+    Map<String, dynamic> selectedFilters
+  ) async {
+    try {
+      return await _repository.applyFiltersInServer(serverId, page, selectedFilters);
+    } catch (e) {
+      throw Exception('Error al aplicar filtros en el servidor $serverId: $e');
+    }
+  }
 }

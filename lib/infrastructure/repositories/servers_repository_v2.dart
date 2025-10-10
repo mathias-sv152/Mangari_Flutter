@@ -1,5 +1,6 @@
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/application/interfaces/i_manga_service.dart';
 import 'package:mangari/application/services/tmo_service.dart';
@@ -150,5 +151,34 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
     }
 
     return await service.searchManga(query, page: page);
+  }
+
+  @override
+  Future<List<FilterGroupEntity>> getFiltersForServer(String serverId) async {
+    final service = _serviceMap[serverId];
+    if (service == null) {
+      throw Exception('Servidor no encontrado: $serverId');
+    }
+
+    try {
+      return await service.getFilters();
+    } catch (e) {
+      // Si el servidor no implementa filtros, retornar lista vacía
+      return [];
+    }
+  }
+
+  @override
+  Future<List<MangaEntity>> applyFiltersInServer(
+    String serverId,
+    int page,
+    Map<String, dynamic> selectedFilters,
+  ) async {
+    final service = _serviceMap[serverId];
+    if (service == null) {
+      throw Exception('Servidor no encontrado: $serverId');
+    }
+
+    return await service.applyFilter(page, selectedFilters);
   }
 }

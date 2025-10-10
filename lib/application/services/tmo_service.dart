@@ -3,9 +3,11 @@ import 'package:html/dom.dart' as dom;
 import '../../domain/entities/manga_entity.dart';
 import '../../domain/entities/chapter_entity.dart';
 import '../../domain/entities/editorial_entity.dart';
+import '../../domain/entities/filter_entity.dart';
 import '../interfaces/i_manga_service.dart';
 import '../../domain/interfaces/i_tmo_repository.dart';
 import '../../infrastructure/utils/html_utils.dart';
+import '../../infrastructure/data/tmo_tags.dart';
 
 /// Servicio TMO que implementa IMangaService
 /// Maneja las peticiones específicas a zonatmo.com
@@ -84,12 +86,122 @@ class TmoService implements IMangaService {
   @override
   Future<List<MangaEntity>> searchManga(String query, {int page = 1}) async {
     try {
-      // TMO no tiene búsqueda específica en el TS original, 
-      // por ahora retornamos la lista normal
-      return await getAllMangas(page: page, limit: 20);
+      final htmlContent = await _tmoRepository.searchMangasByTitle(query, page);
+      final mangaList = _formatListManga(htmlContent);
+      return mangaList;
     } catch (error) {
       throw Exception('Error en TmoService searchManga: $error');
     }
+  }
+
+  @override
+  Future<List<FilterGroupEntity>> getFilters() async {
+    try {
+      // Convertir tmo_tags en grupos de filtros
+      List<TagEntity> tipoTags = tmoTags
+          .where((item) => TagEntity.fromJson(item).type == TypeTagEntity.tipo)
+          .map((item) => TagEntity.fromJson(item))
+          .toList();
+
+      List<TagEntity> estadoTags = tmoTags
+          .where((item) => TagEntity.fromJson(item).type == TypeTagEntity.estado)
+          .map((item) => TagEntity.fromJson(item))
+          .toList();
+
+      List<TagEntity> generoTags = tmoTags
+          .where((item) => TagEntity.fromJson(item).type == TypeTagEntity.genero)
+          .map((item) => TagEntity.fromJson(item))
+          .toList();
+
+      List<TagEntity> orderDirTags = tmoTags
+          .where((item) => TagEntity.fromJson(item).type == TypeTagEntity.orderDir)
+          .map((item) => TagEntity.fromJson(item))
+          .toList();
+
+      List<TagEntity> orderByTags = tmoTags
+          .where((item) => TagEntity.fromJson(item).type == TypeTagEntity.orderBy)
+          .map((item) => TagEntity.fromJson(item))
+          .toList();
+
+      return [
+        FilterGroupEntity(
+          key: 'tmo_tipo',
+          title: 'Tipo de manga',
+          filterType: FilterTypeEntity.radio,
+          options: tipoTags,
+        ),
+        FilterGroupEntity(
+          key: 'tmo_estado',
+          title: 'Estado',
+          filterType: FilterTypeEntity.radio,
+          options: estadoTags,
+          dependsOn: 'tmo_tipo',
+        ),
+        FilterGroupEntity(
+          key: 'tmo_generos',
+          title: 'Géneros',
+          filterType: FilterTypeEntity.checkbox,
+          options: generoTags,
+        ),
+        FilterGroupEntity(
+          key: 'orderBy',
+          title: 'Ordenar por',
+          filterType: FilterTypeEntity.dropdown,
+          options: orderByTags,
+        ),
+        FilterGroupEntity(
+          key: 'orderDir',
+          title: 'Dirección',
+          filterType: FilterTypeEntity.radio,
+          options: orderDirTags,
+        ),
+      ];
+    } catch (error) {
+      throw Exception('Error en TmoService getFilters: $error');
+    }
+  }
+
+  @override
+  Future<List<MangaEntity>> applyFilter(int page, Map<String, dynamic> selectedFilters) async {
+    try {
+      // Preparar los parámetros usando el método helper
+      final params = prepareFilterParams(selectedFilters);
+      
+      // Llamar al repositorio con los parámetros preparados
+      final htmlContent = await _tmoRepository.applyFilter(
+        page: page,
+        selectedGenres: params['selectedGenres'] as List<int>,
+        selectedType: params['selectedType'] as String?,
+        selectedStatus: params['selectedStatus'] as String?,
+        orderBy: params['orderBy'] as String?,
+        orderDir: params['orderDir'] as String?,
+        searchText: params['searchText'] as String?,
+      );
+      
+      final mangaList = _formatListManga(htmlContent);
+      return mangaList;
+    } catch (error) {
+      throw Exception('Error en TmoService applyFilter: $error');
+    }
+  }
+
+  @override
+  Map<String, dynamic> prepareFilterParams(Map<String, dynamic> selectedFilters) {
+    // Extraer géneros
+    List<int> selectedGenres = [];
+    if (selectedFilters.containsKey('tmo_generos') &&
+        selectedFilters['tmo_generos'] is List) {
+      selectedGenres = List<int>.from(selectedFilters['tmo_generos']);
+    }
+
+    return {
+      'selectedGenres': selectedGenres,
+      'selectedType': selectedFilters['tmo_tipo'],
+      'selectedStatus': selectedFilters['tmo_estado'],
+      'orderDir': selectedFilters['orderDir'],
+      'orderBy': selectedFilters['orderBy'],
+      'searchText': selectedFilters['searchText'],
+    };
   }
 
   /// Formatea la lista de manga desde HTML
