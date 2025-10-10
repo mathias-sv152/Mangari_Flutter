@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/manga_detail_entity.dart';
 import 'package:mangari/application/components/performance_utils.dart';
+import 'package:mangari/application/components/smart_cached_image.dart';
 
 /// Grid optimizado para mostrar mangas con alto rendimiento
 class OptimizedMangaGrid extends StatefulWidget {
@@ -185,6 +185,7 @@ class _OptimizedMangaCardState extends State<OptimizedMangaCard>
 }
 
 /// Widget inteligente para cargar imágenes solo cuando son visibles
+/// Ahora soporta AVIF y todos los formatos con optimización automática
 class SmartMangaImage extends StatelessWidget {
   final MangaDetailEntity manga;
   final bool isVisible;
@@ -209,48 +210,11 @@ class SmartMangaImage extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: DraculaTheme.currentLine,
-      child: CachedNetworkImage(
+      child: MangaCoverImage(
         imageUrl: manga.linkImage,
-        httpHeaders: {
-          'Referer': manga.referer ?? '',
-          'User-Agent': 'Mozilla/5.0 (compatible; MangaReader/1.0)',
-        },
-        fit: BoxFit.cover,
-        
-        // Optimizaciones críticas de memoria
-        memCacheWidth: 300, // Reducir tamaño en memoria
-        memCacheHeight: 450,
-        maxWidthDiskCache: 400,
-        maxHeightDiskCache: 600,
-        
-        // Cache más agresivo con key optimizada
-        cacheKey: MangaImageCacheManager.generateCacheKey(manga.id, manga.linkImage),
-        
-        // Placeholder optimizado
-        placeholder: (context, url) => _buildPlaceholder(
-          Icons.downloading,
-          showProgress: true,
-        ),
-        
-        // Error widget optimizado con métricas
-        errorWidget: (context, url, error) {
-          PerformanceMetrics.recordImageError();
-          return _buildErrorWidget();
-        },
-        
-        // Listener para métricas de éxito
-        imageBuilder: (context, imageProvider) {
-          PerformanceMetrics.recordImageLoad();
-          return Image(
-            image: imageProvider,
-            fit: BoxFit.cover,
-            filterQuality: FilterQuality.medium,
-          );
-        },
-        
-        // Animación suave
-        fadeInDuration: const Duration(milliseconds: 300),
-        fadeOutDuration: const Duration(milliseconds: 150),
+        referer: manga.referer ?? '',
+        mangaId: manga.id,
+        isVisible: isVisible,
       ),
     );
   }
@@ -278,31 +242,6 @@ class SmartMangaImage extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorWidget() {
-    return Container(
-      width: double.infinity,
-      color: DraculaTheme.currentLine,
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.broken_image,
-            color: DraculaTheme.red,
-            size: 48,
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Error al cargar',
-            style: TextStyle(
-              color: DraculaTheme.red,
-              fontSize: 12,
-            ),
-          ),
         ],
       ),
     );

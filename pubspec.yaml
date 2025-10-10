@@ -49,6 +49,7 @@ dependencies:
   
   # Image caching and optimization
   cached_network_image: ^3.3.1
+  flutter_avif: ^2.1.0
   
   # Performance monitoring
   visibility_detector: ^0.4.0
