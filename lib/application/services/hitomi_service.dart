@@ -192,7 +192,8 @@ class HitomiService implements IMangaService {
         return [];
       }
 
-      // Obtener datos de gg.js
+      // Obtener datos DINÁMICOS de gg.js (NO cachear - los valores cambian)
+      // Los valores 'b' (timestamp), 'o' y los casos del switch son dinámicos
       final ggData = await _hitomiRepository.getGGData();
       if (ggData == null) {
         print('Failed to get GG data');
@@ -263,51 +264,56 @@ class HitomiService implements IMangaService {
     Map<String, dynamic> ggData,
   ) {
     try {
-      // Implementar la lógica de subdomain_from_url del common.js de Hitomi
+      // Lógica de subdomain_from_url del common.js de Hitomi
       // Para AVIF: 'a' + número, para otros: 'b' + número
       String retval = hasAvif ? 'a' : 'b';
 
       // Extraer los últimos 3 caracteres del hash siguiendo el patrón del regex JS:
-      // /\/[0-9a-f]{61}([0-9a-f]{2})([0-9a-f])/
-      // Grupos: grupo1 = penúltimos 2 chars, grupo2 = último char
+      // var r = /\/[0-9a-f]{61}([0-9a-f]{2})([0-9a-f])/;
+      // Grupos: m[1] = penúltimos 2 chars, m[2] = último char
       final match = RegExp(r'([0-9a-f]{2})([0-9a-f])$').firstMatch(hash);
 
       if (match == null) {
-        print('Warning: Hash does not match expected pattern: $hash');
-        return '${retval}2'; // Default a2/b2 como el más común
+        print('⚠️ Hash does not match expected pattern: $hash');
+        // Usar valor dinámico de gg.js para el fallback
+        final o = ggData['o'] as int? ?? 1;
+        return '$retval${o + 1}'; // Default dinámico basado en 'o'
       }
 
-      // En el código JS: var g = parseInt(m[2]+m[1], b) donde b=16
-      // m[2] = último char, m[1] = penúltimos 2 chars
-      final lastChar = match.group(2)!;
+      // En el código JS: var g = parseInt(m[2]+m[1], 16)
+      // m[1] = penúltimos 2 chars, m[2] = último char
       final secondToLastChars = match.group(1)!;
-      final hexValue = lastChar + secondToLastChars; // Concatenar en orden JS
+      final lastChar = match.group(2)!;
+      final hexValue = lastChar + secondToLastChars; // Concatenar: último + penúltimos
       final g = int.parse(hexValue, radix: 16);
 
-      // Obtener el resultado de la función m de gg.js
+      // Obtener valores DINÁMICOS de gg.js
       final mFunction = ggData['m'] as int Function(int);
       final mResult = mFunction(g);
-      final o = ggData['o'] as int;
+      final isInverted = ggData['isInverted'] as bool? ?? false;
       
-      // En Hitomi, el subdominio se calcula de forma INVERSA:
-      // La función m(g) retorna 0 o 1, pero el subdominio se calcula al revés
-      // - m(g)=0 → subdominio 2 (a2/b2)
-      // - m(g)=1 → subdominio 1 (a1/b1)
+      // Del common.js: retval = retval + (1 + gg.m(g))
+      // La función m(g) puede comportarse de dos formas:
       // 
-      // Esto se confirma con los URLs reales:
-      // - g=3926, m(g)=1 → a1 (no a2)
-      // - g=3173, m(g)=0 → a2 (no a1)
+      // MODO 1 - Normal (oInitial=0, oSwitch=1):
+      //   - m(g) = 0 (default) → subdomain = 1 + 0 = 1 → a1/b1
+      //   - m(g) = 1 (special) → subdomain = 1 + 1 = 2 → a2/b2
       // 
-      // Fórmula correcta: 2 - m(g)
-      final subdomainNumber = 2 - mResult;
+      // MODO 2 - INVERTIDO (oInitial=1, oSwitch=0):
+      //   - m(g) = 1 (default) → subdomain = 1 + 1 = 2 → a2/b2
+      //   - m(g) = 0 (special) → subdomain = 1 + 0 = 1 → a1/b1
+      final subdomainNumber = 1 + mResult;
       final subdomain = retval + subdomainNumber.toString();
       
-      print('Subdomain calc: hash=$hash, hex=$hexValue, g=$g, o=$o, m(g)=$mResult -> $subdomain');
+      final behavior = isInverted ? 'INVERTED' : 'normal';
+      print('🌐 [$behavior] hash=${hash.substring(hash.length - 3)}, g=$g, m(g)=$mResult → $subdomain');
 
       return subdomain;
     } catch (error) {
-      print('Error calculating Hitomi subdomain: $error');
-      return hasAvif ? 'a2' : 'b2'; // Fallback al más común
+      print('❌ Error calculating Hitomi subdomain: $error');
+      // Usar valor dinámico de gg.js para el fallback
+      final o = ggData['o'] as int? ?? 1;
+      return hasAvif ? 'a${o + 1}' : 'b${o + 1}'; // Fallback dinámico
     }
   }
 

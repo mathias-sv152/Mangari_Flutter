@@ -8,6 +8,9 @@ import 'package:mangari/infrastructure/utils/html_utils.dart';
 class HitomiRepository implements IHitomiRepository {
   final String _baseUrl = "https://hitomi.la";
   final http.Client _httpClient;
+  
+  // Fallback en caso de error de red - Solo para emergencias, no para caché normal
+  Map<String, dynamic>? _cachedGGData;
 
   HitomiRepository(this._httpClient);
 
@@ -400,105 +403,139 @@ class HitomiRepository implements IHitomiRepository {
   @override
   Future<Map<String, dynamic>?> getGGData() async {
     try {
+      // NO usar caché - siempre obtener valores frescos
+      // Los valores b, o y los casos del switch son dinámicos
       final response = await _httpClient.get(
         Uri.parse('https://ltn.gold-usergeneratedcontent.net/gg.js'),
       );
 
       if (response.statusCode != 200) {
         print('Failed to fetch gg.js: ${response.statusCode}');
-        return null;
+        return _cachedGGData; // Fallback a datos anteriores si falló
       }
 
       final jsContent = response.body;
-      return _parseGGJS(jsContent);
+      final ggData = _parseGGJS(jsContent);
+      
+      if (ggData != null) {
+        _cachedGGData = ggData; // Solo para fallback en caso de error
+      }
+      
+      return ggData;
     } catch (error) {
       print('Error fetching gg.js: $error');
-      return null;
+      return _cachedGGData; // Fallback a datos anteriores si hubo error
     }
   }
 
   Map<String, dynamic>? _parseGGJS(String jsContent) {
     try {
-      // Extraer el valor de 'b' (timestamp)
+      // Extraer el valor de 'b' (timestamp) - DINÁMICO, cambia cada ~30 min
       final bMatch = RegExp(r"b:\s*'([^']+)'").firstMatch(jsContent);
-      final String b = bMatch != null ? bMatch.group(1)! : '1755651602/';
+      if (bMatch == null || bMatch.group(1) == null) {
+        print('Warning: Could not extract "b" value from gg.js');
+        return null;
+      }
+      final String b = bMatch.group(1)!;
 
-      // Extraer el número de subdominios 'o' del código
-      // Buscar la inicialización de 'o' dentro de la función m
+      // Extraer el valor inicial de 'o' DENTRO de la función m
+      // Este valor es CRÍTICO y puede cambiar entre 0 y 1
+      // var o = 0; → comportamiento: default=0, special=1
+      // var o = 1; → comportamiento INVERTIDO: default=1, special=0
       final oInFunctionMatch = RegExp(r'm:\s*function[^{]*\{[^}]*?var\s+o\s*=\s*(\d+)', dotAll: true).firstMatch(jsContent);
-      final oGlobalMatch = RegExp(r'var\s+o\s*=\s*(\d+)').firstMatch(jsContent);
-      final int o = oInFunctionMatch != null 
-          ? int.parse(oInFunctionMatch.group(1)!) 
-          : (oGlobalMatch != null ? int.parse(oGlobalMatch.group(1)!) : 2);
+      
+      if (oInFunctionMatch == null) {
+        print('Warning: Could not extract initial "o" value from m() function in gg.js');
+        return null;
+      }
+      
+      final int oInitial = int.parse(oInFunctionMatch.group(1)!);
+      
+      // Detectar el valor asignado en los casos del switch
+      // Buscar "o = X; break;" dentro del switch
+      final oSwitchMatch = RegExp(r'case\s+\d+:\s*(?:case\s+\d+:\s*)*o\s*=\s*(\d+);\s*break;', multiLine: true).firstMatch(jsContent);
+      final int? oSwitchValue = oSwitchMatch != null ? int.parse(oSwitchMatch.group(1)!) : null;
 
-      // Función 's' - subdirectory from hash (convierte hex a decimal)
+      // Función 's' - subdirectory from hash (convierte últimos 3 chars hex a decimal)
       String Function(String) s = (String hash) {
         final match = RegExp(r'(..)(.)$').firstMatch(hash);
         if (match == null) return '0/';
-        // Convertir de hex a decimal como en el código TS
+        // Invertir los grupos y convertir de hex a decimal
         final hexValue = match.group(2)! + match.group(1)!;
         final decimalValue = int.parse(hexValue, radix: 16);
         return '$decimalValue/';
       };
 
-      // Función 'm' - module function
-      // Parsear el switch statement del gg.js para obtener los casos
-      // En el código JS real:
-      // - o se inicializa en un valor (típicamente el número de subdominios - 1)
-      // - Los casos específicos hacen "o = 1; break;" (fuerzan subdominio más alto)
-      // - El default retorna o sin modificar (usa módulo o valor inicial)
+      // Función 'm' - Determina el subdominio basándose en casos especiales
+      // Parsear TODOS los casos del switch statement - DINÁMICO
       final Set<int> casesSet = {};
       final switchMatch = RegExp(r'switch\s*\(\s*g\s*\)\s*\{([\s\S]*?)\}', multiLine: true).firstMatch(jsContent);
       
-      if (switchMatch != null) {
-        final switchContent = switchMatch.group(1) ?? '';
-        // Buscar todos los casos que aparecen en el switch
-        final casePattern = RegExp(r'case\s+(\d+):', multiLine: true);
-        final cases = casePattern.allMatches(switchContent);
-        
-        for (final match in cases) {
-          final caseNum = int.parse(match.group(1)!);
-          casesSet.add(caseNum);
-        }
-        
-        print('GG.js parsed: o=$o, Found ${casesSet.length} special cases for m function');
-        print('Sample special cases: ${casesSet.take(10).join(", ")}');
+      if (switchMatch == null) {
+        print('Warning: Could not extract switch statement from gg.js');
+        return null;
       }
       
+      final switchContent = switchMatch.group(1) ?? '';
+      // Buscar todos los números después de 'case'
+      final casePattern = RegExp(r'case\s+(\d+):', multiLine: true);
+      final cases = casePattern.allMatches(switchContent);
+      
+      for (final match in cases) {
+        final caseNum = int.parse(match.group(1)!);
+        casesSet.add(caseNum);
+      }
+      
+      if (casesSet.isEmpty) {
+        print('Warning: No special cases found in gg.js switch statement');
+      }
+      
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('GG.js loaded with DYNAMIC values:');
+      print('  ✓ b (timestamp): $b');
+      print('  ✓ o_initial: $oInitial');
+      print('  ✓ o_switch: ${oSwitchValue ?? "unknown"}');
+      print('  ✓ Special cases: ${casesSet.length} cases');
+      print('  ✓ Sample: ${casesSet.take(10).join(", ")}...');
+      if (oInitial == 0) {
+        print('  ⚙️  Logic: default=$oInitial, special=${oSwitchValue ?? 1}');
+        print('  ⚙️  Normal behavior: default→a1/b1, special→a2/b2');
+      } else {
+        print('  ⚙️  Logic: default=$oInitial, special=${oSwitchValue ?? 0}');
+        print('  ⚙️  INVERTED behavior: default→a2/b2, special→a1/b1');
+      }
+      print('  ⚙️  Formula: subdomain = 1 + m(g)');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
       int Function(int) m = (int g) {
-        // La función m del gg.js funciona exactamente así:
-        // var o = 0;
+        // Lógica extraída dinámicamente del gg.js:
+        // var o = <oInitial>;  ← puede ser 0 o 1
         // switch (g) {
-        //   case 1029: ... case 3342: ... (1984 casos en total)
-        //   o = 1; break;
+        //   case X: o = <oSwitchValue>; break;
+        //   ... (casos variables, pueden cambiar)
         // }
         // return o;
-        //
-        // Es decir:
-        // - Si g está en la lista de ~1984 casos especiales: retorna 1
-        // - Si g NO está en la lista: retorna 0
-        //
-        // Con subdomain = prefix + (1 + m(g)):
-        // - Casos especiales (m(g)=1) → a2/b2
-        // - Resto (m(g)=0) → a1/b1
         
-        if (casesSet.isNotEmpty && casesSet.contains(g)) {
-          // g está en los casos especiales del switch
-          return 1;
+        if (casesSet.contains(g)) {
+          // Casos especiales retornan el valor del switch
+          return oSwitchValue ?? (1 - oInitial); // Si no se detectó, asumir el opuesto de oInitial
         }
         
-        // g NO está en los casos especiales
-        return 0;
+        return oInitial; // Casos normales retornan el valor inicial
       };
 
       return {
-        'o': o,
+        'o': oInitial, // Valor inicial de 'o' en la función m
+        'oSwitch': oSwitchValue, // Valor asignado en casos especiales
+        'isInverted': oInitial == 1, // Flag para saber si está en modo invertido
         'b': b,
         's': s,
         'm': m,
+        'casesCount': casesSet.length,
+        'timestamp': DateTime.now().toIso8601String(), // Para debug
       };
     } catch (error) {
-      print('Error parsing gg.js: $error');
+      print('❌ Error parsing gg.js: $error');
       return null;
     }
   }
