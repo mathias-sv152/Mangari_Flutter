@@ -3,9 +3,11 @@ import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/entities/manga_detail_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
+import 'package:mangari/domain/entities/filter_entity.dart';
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:mangari/application/components/optimized_manga_grid.dart';
+import 'package:mangari/application/components/filter_bottom_sheet.dart';
 import 'package:mangari/application/views/manga_detail_view.dart';
 
 class MangaListView extends StatefulWidget {
@@ -23,22 +25,48 @@ class MangaListView extends StatefulWidget {
 class _MangaListViewState extends State<MangaListView> {
   ServersServiceV2? _serversService;
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
   
   List<MangaEntity> _mangas = [];
+  List<FilterGroupEntity> _availableFilters = [];
+  Map<String, dynamic> _selectedFilters = {};
+  
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _hasMorePages = true;
+  bool _hasFilters = false;
+  bool _isSearching = false;
   String? _errorMessage;
+  String _searchQuery = '';
   int _currentPage = 1;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _searchController.addListener(_onSearchChanged);
     // Posponer la inicialización hasta después del primer frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeService();
     });
+  }
+
+  void _onSearchChanged() {
+    // Debounce para evitar búsquedas excesivas
+    if (_searchController.text != _searchQuery) {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+      _performSearch();
+    }
+  }
+
+  void _performSearch() async {
+    if (_searchQuery.isEmpty) {
+      await _loadMangas();
+    } else {
+      await _searchMangas();
+    }
   }
 
   void _initializeService() async {
@@ -51,6 +79,7 @@ class _MangaListViewState extends State<MangaListView> {
       
       if (_serversService != null) {
         print('✅ MangaListView: ServersServiceV2 obtenido correctamente');
+        await _loadFilters();
         await _loadMangas();
       } else {
         print('❌ MangaListView: No se pudo obtener ServersServiceV2');
@@ -70,9 +99,27 @@ class _MangaListViewState extends State<MangaListView> {
     }
   }
 
+  Future<void> _loadFilters() async {
+    if (_serversService == null) return;
+    
+    try {
+      final filters = await _serversService!.getFiltersForServer(widget.server.id);
+      setState(() {
+        _availableFilters = filters;
+        _hasFilters = filters.isNotEmpty;
+      });
+    } catch (e) {
+      print('⚠️ Servidor no tiene filtros disponibles: $e');
+      setState(() {
+        _hasFilters = false;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -95,12 +142,79 @@ class _MangaListViewState extends State<MangaListView> {
     });
 
     try {
-      final mangas = await _serversService!.getMangasFromServer(widget.server.id, page: _currentPage);
+      List<MangaEntity> mangas;
+      
+      // Si hay filtros seleccionados, aplicar filtros
+      if (_selectedFilters.isNotEmpty) {
+        // Agregar el texto de búsqueda a los filtros si existe
+        if (_searchQuery.isNotEmpty) {
+          _selectedFilters['searchText'] = _searchQuery;
+        }
+        mangas = await _serversService!.applyFiltersInServer(
+          widget.server.id, 
+          _currentPage, 
+          _selectedFilters,
+        );
+      } else if (_searchQuery.isNotEmpty) {
+        // Solo búsqueda sin filtros
+        mangas = await _serversService!.searchMangaInServer(
+          widget.server.id, 
+          _searchQuery, 
+          page: _currentPage,
+        );
+      } else {
+        // Carga normal sin búsqueda ni filtros
+        mangas = await _serversService!.getMangasFromServer(
+          widget.server.id, 
+          page: _currentPage,
+        );
+      }
       
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        _hasMorePages = mangas.length >= 20; // Ajustado a 20 por página
+        _hasMorePages = mangas.length >= 20;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _searchMangas() async {
+    if (!mounted || _serversService == null) return;
+    
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _currentPage = 1;
+    });
+
+    try {
+      List<MangaEntity> mangas;
+      
+      // Si hay filtros, combinar búsqueda con filtros
+      if (_selectedFilters.isNotEmpty) {
+        _selectedFilters['searchText'] = _searchQuery;
+        mangas = await _serversService!.applyFiltersInServer(
+          widget.server.id, 
+          _currentPage, 
+          _selectedFilters,
+        );
+      } else {
+        mangas = await _serversService!.searchMangaInServer(
+          widget.server.id, 
+          _searchQuery, 
+          page: _currentPage,
+        );
+      }
+      
+      setState(() {
+        _mangas = mangas;
+        _isLoading = false;
+        _hasMorePages = mangas.length >= 20;
       });
     } catch (e) {
       setState(() {
@@ -118,7 +232,24 @@ class _MangaListViewState extends State<MangaListView> {
     });
 
     try {
-      final newMangas = await _serversService!.getMangasFromServer(widget.server.id, page: _currentPage + 1);
+      List<MangaEntity> newMangas;
+      
+      // Cargar más según el estado actual
+      if (_selectedFilters.isNotEmpty || _searchQuery.isNotEmpty) {
+        if (_searchQuery.isNotEmpty) {
+          _selectedFilters['searchText'] = _searchQuery;
+        }
+        newMangas = await _serversService!.applyFiltersInServer(
+          widget.server.id, 
+          _currentPage + 1, 
+          _selectedFilters,
+        );
+      } else {
+        newMangas = await _serversService!.getMangasFromServer(
+          widget.server.id, 
+          page: _currentPage + 1,
+        );
+      }
       
       setState(() {
         _mangas.addAll(newMangas);
@@ -140,6 +271,37 @@ class _MangaListViewState extends State<MangaListView> {
         );
       }
     }
+  }
+
+  void _showFilterBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => FilterBottomSheet(
+          filterGroups: _availableFilters,
+          initialFilters: _selectedFilters,
+          onApply: (filters) {
+            setState(() {
+              _selectedFilters = filters;
+            });
+            _loadMangas();
+          },
+        ),
+      ),
+    );
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+    });
+    _loadMangas();
   }
 
   // Método para convertir MangaEntity a MangaDetailEntity
@@ -165,31 +327,176 @@ class _MangaListViewState extends State<MangaListView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.server.name),
-            Text(
-              'Catálogo de Manga',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: DraculaTheme.comment,
+      appBar: _buildAppBar(),
+      body: _buildMangaList(),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    final hasActiveFilters = _selectedFilters.isNotEmpty || _searchQuery.isNotEmpty;
+    final appBarHeight = hasActiveFilters ? 104.0 : 56.0;
+    
+    return PreferredSize(
+      preferredSize: Size.fromHeight(appBarHeight),
+      child: AppBar(
+        scrolledUnderElevation: 0,
+        title: _isSearching 
+          ? TextField(
+              controller: _searchController,
+              autofocus: true,
+              style: const TextStyle(color: DraculaTheme.foreground),
+              decoration: const InputDecoration(
+                hintText: 'Buscar manga...',
+                hintStyle: TextStyle(color: DraculaTheme.comment),
+                border: InputBorder.none,
               ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.server.name),
+                Text(
+                  'Catálogo de Manga',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DraculaTheme.comment,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            if (_isSearching) {
+              setState(() {
+                _isSearching = false;
+                _clearSearch();
+              });
+            } else {
+              Navigator.of(context).pop();
+            }
+          },
         ),
-      ),
-      body: Column(
-        children: [
-          // Lista de mangas
-          Expanded(child: _buildMangaList()),
+        actions: [
+          // Botón de búsqueda
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                if (_isSearching) {
+                  _clearSearch();
+                }
+                _isSearching = !_isSearching;
+              });
+            },
+          ),
+          // Botón de filtros (solo si el servidor tiene filtros)
+          if (_hasFilters)
+            Stack(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.filter_list),
+                  onPressed: _showFilterBottomSheet,
+                ),
+                if (_getActiveFiltersCount() > 0)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: DraculaTheme.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        '${_getActiveFiltersCount()}',
+                        style: const TextStyle(
+                          color: DraculaTheme.background,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
         ],
+        bottom: hasActiveFilters ? _buildChipsBar() : null,
       ),
     );
+  }
+
+  PreferredSizeWidget _buildChipsBar() {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(48),
+      child: Container(
+        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: _buildChipsList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildChipsList() {
+    List<Widget> chips = [];
+    
+    // Chip de búsqueda
+    if (_searchQuery.isNotEmpty) {
+      chips.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Chip(
+            label: Text('Búsqueda: $_searchQuery'),
+            deleteIcon: const Icon(Icons.close, size: 18),
+            onDeleted: _clearSearch,
+            backgroundColor: DraculaTheme.purple,
+            labelStyle: const TextStyle(color: DraculaTheme.background),
+          ),
+        ),
+      );
+    }
+    
+    // Chips de filtros (excluyendo searchText del conteo)
+    final activeFiltersCount = _getActiveFiltersCount();
+    if (activeFiltersCount > 0) {
+      chips.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Chip(
+            label: Text('$activeFiltersCount filtro(s) activo(s)'),
+            deleteIcon: const Icon(Icons.close, size: 18),
+            onDeleted: () {
+              setState(() {
+                _selectedFilters.clear();
+              });
+              _loadMangas();
+            },
+            backgroundColor: DraculaTheme.green,
+            labelStyle: const TextStyle(color: DraculaTheme.background),
+          ),
+        ),
+      );
+    }
+    
+    return chips;
+  }
+
+  /// Obtiene el número de filtros activos excluyendo 'searchText'
+  int _getActiveFiltersCount() {
+    return _selectedFilters.entries
+        .where((entry) => entry.key != 'searchText')
+        .length;
   }
 
   Widget _buildMangaList() {
