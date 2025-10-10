@@ -165,8 +165,8 @@ class TmoService implements IMangaService {
       final document = html_parser.parse(html);
       
       // Comenzar con los datos básicos que tenemos del link
-      final titleElement = HtmlUtils.findElement(document, 'h1, h2, .title');
-      final title = HtmlUtils.getTextContent(titleElement);
+      final titleElement = HtmlUtils.findElement(document, 'section.element-header-content > div.container.h-100 > div > div.col-12.col-md-9.element-header-content-text > h1');
+      final title = HtmlUtils.getTextContent(titleElement).replaceAll(RegExp(r'\s+'), ' ').trim();
       
       // Extraer descripción
       String? description;
