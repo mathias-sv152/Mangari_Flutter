@@ -73,7 +73,7 @@ class _OptimizedMangaGridState extends State<OptimizedMangaGrid>
         ),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
-          childAspectRatio: 0.7,
+          childAspectRatio: 0.65, // Más alto para dar espacio al texto
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
         ),
@@ -159,20 +159,19 @@ class _OptimizedMangaCardState extends State<OptimizedMangaCard>
             onTap: widget.onTap,
             borderRadius: BorderRadius.circular(12),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Imagen optimizada
+                // Imagen optimizada con altura flexible
                 Expanded(
-                  flex: 3,
                   child: SmartMangaImage(
                     manga: widget.manga,
                     isVisible: _isVisible,
                   ),
                 ),
                 
-                // Información del manga
-                Expanded(
-                  flex: 2,
+                // Información del manga con altura fija
+                SizedBox(
+                  height: 110, // Altura fija para garantizar espacio al texto
                   child: MangaInfoPanel(manga: widget.manga),
                 ),
               ],
@@ -209,6 +208,7 @@ class SmartMangaImage extends StatelessWidget {
 
     return Container(
       width: double.infinity,
+      height: double.infinity,
       color: DraculaTheme.currentLine,
       child: MangaCoverImage(
         imageUrl: manga.linkImage,
@@ -259,43 +259,64 @@ class MangaInfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
+    return Container(
+      padding: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: DraculaTheme.currentLine.withValues(alpha: 0.3),
+        border: Border(
+          top: BorderSide(
+            color: DraculaTheme.comment.withValues(alpha: 0.2),
+            width: 1,
+          ),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Título optimizado
-          Flexible(
-            child: Text(
-              manga.title,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: DraculaTheme.foreground,
-                height: 1.2,
+          // Título optimizado con altura fija
+          SizedBox(
+            height: 36, // Reducido para evitar overflow
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                manga.title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: DraculaTheme.foreground,
+                  height: 1.3,
+                  letterSpacing: 0.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 5),
           
           // Tags optimizados
           _OptimizedTagRow(manga: manga),
+          const SizedBox(height: 5),
           
-          const Spacer(),
-          
-          // Estado
-          Text(
-            manga.status,
-            style: const TextStyle(
-              color: DraculaTheme.comment,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
+          // Estado con fondo
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: DraculaTheme.purple.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            child: Text(
+              manga.status,
+              style: const TextStyle(
+                color: DraculaTheme.purple,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -312,20 +333,21 @@ class _OptimizedTagRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 21, // Altura fija para evitar overflow
+      height: 22, // Altura fija para evitar overflow
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
         child: Row(
           children: [
             _OptimizedTag(
               text: manga.bookType,
-              color: DraculaTheme.purple,
+              color: DraculaTheme.cyan,
             ),
             if (manga.demography != 'N/A') ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               _OptimizedTag(
                 text: manga.demography,
-                color: DraculaTheme.cyan,
+                color: DraculaTheme.green,
               ),
             ],
           ],
@@ -349,23 +371,25 @@ class _OptimizedTag extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 3,
+        horizontal: 7,
+        vertical: 4,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(5),
         border: Border.all(
-          color: color.withValues(alpha: 0.3),
-          width: 0.5,
+          color: color.withValues(alpha: 0.4),
+          width: 1,
         ),
       ),
       child: Text(
         text,
         style: TextStyle(
+          textBaseline: TextBaseline.alphabetic,
           color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
