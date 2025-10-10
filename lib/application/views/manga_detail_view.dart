@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/manga_detail_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
@@ -10,6 +9,7 @@ import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:mangari/application/views/manga_reader_view.dart';
+import 'package:mangari/application/components/smart_cached_image.dart';
 
 class MangaDetailView extends StatefulWidget {
   final MangaDetailEntity manga;
@@ -303,17 +303,20 @@ class _MangaDetailViewState extends State<MangaDetailView> {
                 borderRadius: BorderRadius.circular(8),
                 child: Stack(
                   children: [
-                    CachedNetworkImage(
+                    SmartCachedImage(
                       imageUrl: manga.linkImage.trim(),
                       httpHeaders: {
                         'Referer': manga.referer ?? '',
+                        'User-Agent': 'Mozilla/5.0 (compatible; MangaReader/1.0)',
                       },
                       fit: BoxFit.cover,
                       width: double.infinity,
                       height: double.infinity,
                       memCacheWidth: 240,
                       memCacheHeight: 360,
-                      placeholder: (context, url) => Container(
+                      cacheKey: 'manga_detail_cover_${manga.id}',
+                      filterQuality: FilterQuality.high,
+                      placeholder: Container(
                         color: DraculaTheme.selection,
                         child: const Center(
                           child: CircularProgressIndicator(
@@ -322,7 +325,7 @@ class _MangaDetailViewState extends State<MangaDetailView> {
                           ),
                         ),
                       ),
-                      errorWidget: (context, url, error) => Container(
+                      errorWidget: Container(
                         color: DraculaTheme.selection,
                         child: const Center(
                           child: Icon(
@@ -681,14 +684,20 @@ class _MangaDetailViewState extends State<MangaDetailView> {
                       maxWidth: MediaQuery.of(context).size.width * 0.9,
                       maxHeight: MediaQuery.of(context).size.height * 0.8,
                     ),
-                    child: CachedNetworkImage(
+                    child: SmartCachedImage(
                       imageUrl: manga.linkImage,
                       httpHeaders: {
                         'Referer': manga.referer ?? '',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'User-Agent': 'Mozilla/5.0 (compatible; MangaReader/1.0)',
                       },
                       fit: BoxFit.contain,
-                      placeholder: (context, url) => Container(
+                      width: MediaQuery.of(context).size.width * 0.9,
+                      height: MediaQuery.of(context).size.height * 0.8,
+                      memCacheWidth: 800,
+                      memCacheHeight: 1200,
+                      cacheKey: 'manga_detail_zoom_${manga.id}',
+                      filterQuality: FilterQuality.high,
+                      placeholder: Container(
                         width: 200,
                         height: 300,
                         color: DraculaTheme.selection,
@@ -699,7 +708,7 @@ class _MangaDetailViewState extends State<MangaDetailView> {
                           ),
                         ),
                       ),
-                      errorWidget: (context, url, error) => Container(
+                      errorWidget: Container(
                         width: 200,
                         height: 300,
                         color: DraculaTheme.selection,
