@@ -44,21 +44,10 @@ class _MangaListViewState extends State<MangaListView> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _searchController.addListener(_onSearchChanged);
     // Posponer la inicialización hasta después del primer frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeService();
     });
-  }
-
-  void _onSearchChanged() {
-    // Debounce para evitar búsquedas excesivas
-    if (_searchController.text != _searchQuery) {
-      setState(() {
-        _searchQuery = _searchController.text;
-      });
-      _performSearch();
-    }
   }
 
   void _performSearch() async {
@@ -346,10 +335,17 @@ class _MangaListViewState extends State<MangaListView> {
               autofocus: true,
               style: const TextStyle(color: DraculaTheme.foreground),
               decoration: const InputDecoration(
-                hintText: 'Buscar manga...',
+                hintText: 'Buscar manga (presiona Enter)...',
                 hintStyle: TextStyle(color: DraculaTheme.comment),
                 border: InputBorder.none,
               ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+                _performSearch();
+              },
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
