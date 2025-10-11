@@ -329,8 +329,14 @@ class HitomiService implements IMangaService {
   @override
   Future<List<MangaEntity>> searchManga(String query, {int page = 1}) async {
     try {
-      // Hitomi no tiene búsqueda específica, retornamos la lista normal
-      return await getAllMangas(page: page, limit: 20);
+      print('🔍 Searching Hitomi for: "$query" (page $page)');
+      
+      // Usar el método de búsqueda del repositorio
+      final galleries = await _hitomiRepository.searchManga(query, page);
+      final formattedList = _formatListManga(galleries);
+      
+      print('✅ Found ${formattedList.length} results for "$query"');
+      return formattedList;
     } catch (error) {
       print('Error en HitomiService searchManga: $error');
       return [];
@@ -339,8 +345,46 @@ class HitomiService implements IMangaService {
 
   @override
   Future<List<FilterGroupEntity>> getFilters() async {
-    // Hitomi no tiene filtros específicos
-    return [];
+    // Retornar filtros de ordenamiento para Hitomi
+    return [
+      FilterGroupEntity(
+        key: 'orderBy',
+        title: 'Ordenar por',
+        filterType: FilterTypeEntity.radio,
+        options: [
+          TagEntity(
+            name: 'Fecha Añadida',
+            value: 'date_added',
+            type: TypeTagEntity.orderBy,
+          ),
+          TagEntity(
+            name: 'Fecha Publicada',
+            value: 'date_published',
+            type: TypeTagEntity.orderBy,
+          ),
+          TagEntity(
+            name: 'Popular: Hoy',
+            value: 'popular_today',
+            type: TypeTagEntity.orderBy,
+          ),
+          TagEntity(
+            name: 'Popular: Semana',
+            value: 'popular_week',
+            type: TypeTagEntity.orderBy,
+          ),
+          TagEntity(
+            name: 'Popular: Mes',
+            value: 'popular_month',
+            type: TypeTagEntity.orderBy,
+          ),
+          TagEntity(
+            name: 'Popular: Año',
+            value: 'popular_year',
+            type: TypeTagEntity.orderBy,
+          ),
+        ],
+      ),
+    ];
   }
 
   @override
@@ -348,15 +392,74 @@ class HitomiService implements IMangaService {
     int page,
     Map<String, dynamic> selectedFilters,
   ) async {
-    // Hitomi no tiene filtros específicos, retornamos la lista normal
-    return await getAllMangas(page: page, limit: 20);
+    try {
+      // Extraer parámetros de los filtros
+      final filterParams = prepareFilterParams(selectedFilters);
+      final searchText = selectedFilters['searchText'] as String? ?? '';
+      final orderBy = filterParams['orderBy'] as String?;
+      final orderByKey = filterParams['orderByKey'] as String?;
+
+      print('🔍 Hitomi applyFilter:');
+      print('  📝 Query: "$searchText"');
+      print('  🔢 Page: $page');
+      print('  📊 OrderBy: $orderBy, Key: $orderByKey');
+
+      // Usar el método con filtros
+      final galleries = await _hitomiRepository.searchMangaWithFilters(
+        searchText,
+        page,
+        orderBy: orderBy,
+        orderByKey: orderByKey,
+      );
+
+      final formattedList = _formatListManga(galleries);
+      print('✅ Hitomi: Found ${formattedList.length} results');
+      
+      return formattedList;
+    } catch (error) {
+      print('❌ Error en HitomiService applyFilter: $error');
+      return [];
+    }
   }
 
   @override
   Map<String, dynamic> prepareFilterParams(
     Map<String, dynamic> selectedFilters,
   ) {
-    // Hitomi no tiene filtros específicos
-    return {};
+    final params = <String, dynamic>{};
+
+    // Procesar filtro de ordenamiento
+    final orderByValue = selectedFilters['orderBy'] as String?;
+    
+    if (orderByValue != null) {
+      // Mapear los valores del filtro a los parámetros del repositorio
+      switch (orderByValue) {
+        case 'date_added':
+          // Por defecto, no se necesitan parámetros adicionales
+          break;
+        case 'date_published':
+          params['orderBy'] = 'date';
+          params['orderByKey'] = 'published';
+          break;
+        case 'popular_today':
+          params['orderBy'] = 'popular';
+          params['orderByKey'] = 'today';
+          break;
+        case 'popular_week':
+          params['orderBy'] = 'popular';
+          params['orderByKey'] = 'week';
+          break;
+        case 'popular_month':
+          params['orderBy'] = 'popular';
+          params['orderByKey'] = 'month';
+          break;
+        case 'popular_year':
+          params['orderBy'] = 'popular';
+          params['orderByKey'] = 'year';
+          break;
+      }
+    }
+
+    return params;
   }
 }

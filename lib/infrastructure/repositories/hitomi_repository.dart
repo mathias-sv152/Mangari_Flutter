@@ -25,6 +25,23 @@ class HitomiRepository implements IHitomiRepository {
     }
   }
 
+  @override
+  Future<List<Map<String, dynamic>>> searchManga(String genre, int page) async {
+    try {
+      // Actualmente no implementado - usar el método nozomi como fallback
+      return await _getMangaNozomi(page);
+    } catch (error) {
+      print('Error in HitomiRepository getMangaByGenre: $error');
+      return [];
+    }
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> searchMangaWithFilters(String query, int page, {String? orderBy, String? orderByKey}) {
+    // Actualmente no implementado - usar el método nozomi como fallback
+    return _getMangaNozomi(page);
+  }
+
   Future<List<Map<String, dynamic>>> _getMangaNozomi(int page) async {
     try {
       // Hitomi usa un sistema de nozomi para las listas con paginación por bytes
