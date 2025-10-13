@@ -71,6 +71,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   // Timer para guardar progreso periódicamente
   Timer? _progressSaveTimer;
 
+  // Timer para debounce de navegación del slider
+  Timer? _sliderNavigationTimer;
+
   @override
   void initState() {
     super.initState();
@@ -93,8 +96,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     // Guardar progreso final antes de salir
     _saveReadingProgress();
 
-    // Cancelar timer
+    // Cancelar timers
     _progressSaveTimer?.cancel();
+    _sliderNavigationTimer?.cancel();
 
     // Limpiar recursos
     _httpClient.close();
@@ -220,15 +224,26 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       _currentPage = newPage;
     });
 
-    // Guardar progreso después de un pequeño delay para evitar guardados excesivos
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (_currentPage == newPage) {
-        _saveReadingProgress();
+    // Cancelar navegación previa si existe
+    _sliderNavigationTimer?.cancel();
 
-        // Si llegó a la última página, marcar como completado
-        if (newPage >= _images.length - 1) {
-          _markChapterAsCompleted();
-        }
+    // Usar debounce para evitar navegaciones excesivas durante arrastre del slider
+    _sliderNavigationTimer = Timer(const Duration(milliseconds: 200), () {
+      if (_currentPage == newPage && mounted) {
+        print('🎚️ Ejecutando navegación de slider a página $newPage');
+        _navigateToPageFromSlider(newPage);
+
+        // Guardar progreso después de la navegación
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (_currentPage == newPage) {
+            _saveReadingProgress();
+
+            // Si llegó a la última página, marcar como completado
+            if (newPage >= _images.length - 1) {
+              _markChapterAsCompleted();
+            }
+          }
+        });
       }
     });
   }
@@ -772,6 +787,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         let contentShown = false;  // Flag para saber si ya se mostró el contenido
         let lastRenderedRange = { start: ${(_currentPage - 5).clamp(0, _images.length)}, end: ${(_currentPage + 6).clamp(0, _images.length)} };
         let initialLoadComplete = false; // Flag para saber si completamos la carga inicial
+        let lastPageTrackerUpdate = 0; // Timestamp del último update del tracker
+        const PAGE_TRACKER_THROTTLE = 300; // Mínimo tiempo entre updates del tracker (ms)
         
         // 🚀 SISTEMA DE RENDERIZADO VIRTUAL
         // Renderiza dinámicamente solo las imágenes visibles y cercanas
@@ -794,19 +811,31 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           // Actualizar rango
           lastRenderedRange = { start: newStart, end: newEnd };
           
-          // 1️⃣ Convertir a placeholders las imágenes fuera del rango
-          const allContainers = document.querySelectorAll('.image-container');
-          allContainers.forEach(container => {
-            const index = parseInt(container.getAttribute('data-index'));
-            const isRendered = container.getAttribute('data-rendered') === 'true';
-            const shouldBeRendered = index >= newStart && index < newEnd;
+          // Usar requestAnimationFrame para mejor performance
+          requestAnimationFrame(function() {
+            // 1️⃣ Convertir a placeholders las imágenes fuera del rango
+            const allContainers = document.querySelectorAll('.image-container');
+            let rendered = 0;
+            let placeholders = 0;
             
-            if (isRendered && !shouldBeRendered) {
-              // Convertir a placeholder
-              convertToPlaceholder(container, index);
-            } else if (!isRendered && shouldBeRendered) {
-              // Renderizar imagen
-              renderImage(container, index);
+            allContainers.forEach(container => {
+              const index = parseInt(container.getAttribute('data-index'));
+              const isRendered = container.getAttribute('data-rendered') === 'true';
+              const shouldBeRendered = index >= newStart && index < newEnd;
+              
+              if (isRendered && !shouldBeRendered) {
+                // Convertir a placeholder
+                convertToPlaceholder(container, index);
+                placeholders++;
+              } else if (!isRendered && shouldBeRendered) {
+                // Renderizar imagen
+                renderImage(container, index);
+                rendered++;
+              }
+            });
+            
+            if (rendered > 0 || placeholders > 0) {
+              console.log('✅ Renderizado virtual: +' + rendered + ' imágenes, +' + placeholders + ' placeholders');
             }
           });
         }
@@ -1030,16 +1059,29 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           
           // Actualizar si encontramos una página visible y es diferente
           if (mostVisible !== null && currentPage !== mostVisible) {
+            const now = Date.now();
+            const timeSinceLastUpdate = now - lastPageTrackerUpdate;
+            
+            // Throttle para evitar updates excesivos
+            if (timeSinceLastUpdate < PAGE_TRACKER_THROTTLE) {
+              return;
+            }
+            
+            const previousPage = currentPage;
             currentPage = mostVisible;
+            lastPageTrackerUpdate = now;
+            
+            console.log('📊 Cambio de página detectado por scroll: ' + previousPage + ' → ' + currentPage);
             
             // 🚀 Actualizar renderizado virtual cuando cambia la página
             updateVirtualRendering(currentPage);
             
-            // Notificar inmediatamente a Flutter
+            // Notificar inmediatamente a Flutter (marcado como fromScroll)
             if (window.flutter_inappwebview) {
               window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
                 currentPage: currentPage,
-                totalPages: document.querySelectorAll('.image-container').length
+                totalPages: document.querySelectorAll('.image-container').length,
+                fromScroll: true
               }));
             }
           }
@@ -1170,36 +1212,57 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     _cachedLoadedCount = null;
   }
 
-  void _navigateToPage(int pageIndex) {
+  void _navigateToPageFromSlider(int pageIndex) {
     if (pageIndex < 0 || pageIndex >= _images.length) return;
+
+    print('🎯 Navegación desde slider a página $pageIndex');
 
     final script = '''
       (function() {
-        // Asegurar que el tracker esté habilitado para navegación manual
-        pageTrackerEnabled = true;
+        console.log('🎯 Navegación desde slider: deshabilitar tracker y navegar a $pageIndex');
         
-        // 🚀 Actualizar renderizado virtual ANTES de hacer scroll
+        // PASO 1: Deshabilitar tracker completamente durante navegación manual
+        pageTrackerEnabled = false;
+        
+        // PASO 2: Actualizar renderizado virtual ANTES del scroll
         if (typeof updateVirtualRendering === 'function') {
           updateVirtualRendering($pageIndex);
         }
         
+        // PASO 3: Encontrar y navegar al contenedor
         const container = document.querySelector('[data-index="$pageIndex"]');
         if (container) {
           // Si es un placeholder, renderizarlo primero
           if (container.getAttribute('data-rendered') === 'false') {
+            console.log('📄 Renderizando placeholder para página $pageIndex');
             renderImage(container, $pageIndex);
-            // Dar tiempo para que se renderice
-            setTimeout(function() {
-              container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 50);
-          } else {
-            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
           
-          // Actualizar prioridades de carga
+          // PASO 4: Scroll instantáneo para evitar conflictos
+          console.log('📍 Haciendo scroll instantáneo a página $pageIndex');
+          container.scrollIntoView({ behavior: 'instant', block: 'start' });
+          
+          // PASO 5: Actualizar estado interno inmediatamente
+          currentPage = $pageIndex;
+          
+          // PASO 6: Actualizar prioridades de carga
           if (typeof updateLoadingPriorities === 'function') {
             updateLoadingPriorities($pageIndex);
           }
+          
+          // PASO 7: Re-habilitar tracker después de un delay mayor
+          setTimeout(function() {
+            console.log('✅ Re-habilitando tracker después de navegación manual');
+            pageTrackerEnabled = true;
+            // Resetear timestamp para permitir inmediatamente el próximo update
+            lastPageTrackerUpdate = 0;
+          }, 1500); // Delay más largo para evitar conflictos
+        } else {
+          console.log('⚠️ Contenedor no encontrado para página $pageIndex');
+          // Re-habilitar tracker incluso si falla
+          setTimeout(function() {
+            pageTrackerEnabled = true;
+          }, 500);
         }
       })();
     ''';
@@ -1210,7 +1273,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void _navigateToPageInstantly(int pageIndex) {
     if (pageIndex < 0 || pageIndex >= _images.length) return;
 
-    print('🚀 Navegando instantáneamente a página $pageIndex');
+    print(
+      '🚀 Navegando instantáneamente a página $pageIndex (progreso guardado)',
+    );
 
     final script = '''
       (function() {
@@ -1234,13 +1299,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           // PASO 2: Actualizar estado
           currentPage = $pageIndex;
           
-          // PASO 3: Notificar a Flutter INMEDIATAMENTE
-          if (window.flutter_inappwebview) {
-            window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
-              currentPage: $pageIndex,
-              totalPages: document.querySelectorAll('.image-container').length
-            }));
-          }
+          // PASO 3: NO notificar a Flutter para evitar bucles (viene de progreso guardado)
+          console.log('🔇 Omitiendo notificación a Flutter (navegación de progreso)');
           
           // PASO 4: Verificar y mostrar contenido rápidamente
           setTimeout(function() {
@@ -1452,8 +1512,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                               onChanged: (value) {
                                 final newPage = value.round();
                                 if (newPage != _currentPage) {
+                                  print('🎚️ Slider cambió a página $newPage');
                                   _updateCurrentPageProgress(newPage);
-                                  _navigateToPage(newPage);
                                 }
                               },
                             ),
@@ -1590,13 +1650,17 @@ class _MangaReaderViewState extends State<MangaReaderView> {
               final message = args[0] as String;
               final pageData = jsonDecode(message);
               final newPage = pageData['currentPage'] ?? 0;
+              final isFromScroll = pageData['fromScroll'] ?? true;
 
               print(
-                '📄 PageTracker recibido: página $newPage (actual: $_currentPage)',
+                '📄 PageTracker recibido: página $newPage (actual: $_currentPage) ${isFromScroll ? '[scroll]' : '[manual]'}',
               );
 
-              if (_currentPage != newPage) {
-                print('✅ Actualizando página: $_currentPage → $newPage');
+              // Solo procesar si viene del scroll automático, no de navegación manual
+              if (_currentPage != newPage && isFromScroll) {
+                print(
+                  '✅ Actualizando página por scroll: $_currentPage → $newPage',
+                );
 
                 // Actualizar inmediatamente para que el slider se sincronice
                 if (mounted) {
@@ -1616,6 +1680,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                     }
                   }
                 });
+              } else if (!isFromScroll) {
+                print('🔇 Ignorando PageTracker de navegación manual');
               }
             } catch (e) {
               print('❌ Error en PageTracker handler: $e');
