@@ -319,6 +319,12 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         const container = document.querySelector('[data-index="$index"]');
         if (!container) return;
         
+        // Si es un placeholder, renderizarlo primero
+        if (container.getAttribute('data-rendered') === 'false') {
+          renderImage(container, $index);
+          return;
+        }
+        
         const img = container.querySelector('img');
         const overlay = container.querySelector('.loading-overlay');
         
@@ -484,11 +490,40 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     print(
       '🔄 Cargando HTML con ${_images.length} imágenes, página inicial: $_currentPage',
     );
+
+    // Advertencia si el capítulo tiene muchas imágenes
+    if (_images.length > 100) {
+      print(
+        '⚡ RENDERIZADO VIRTUAL ACTIVADO: Solo se renderizan imágenes visibles (±15 páginas)',
+      );
+      print(
+        '   Esto mejora significativamente el rendimiento en capítulos grandes (${_images.length} páginas)',
+      );
+    }
+
     print('🔍 Usando referer: ${widget.referer}');
     _webViewController?.loadData(data: htmlContent);
   }
 
   String _generateHtmlContent() {
+    // 🚀 RENDERIZADO VIRTUAL: Solo renderizar imágenes cercanas inicialmente
+    // Para capítulos grandes (500+ imágenes), esto mejora significativamente el performance
+
+    // Ventana inicial más pequeña para carga rápida
+    const int initialRenderWindow = 5; // Solo actual ± 5 imágenes inicialmente
+    final int startIndex = (_currentPage - initialRenderWindow).clamp(
+      0,
+      _images.length,
+    );
+    final int endIndex = (_currentPage + initialRenderWindow + 1).clamp(
+      0,
+      _images.length,
+    );
+
+    print(
+      '🎨 Renderizado virtual OPTIMIZADO: Generando HTML para imágenes $startIndex-${endIndex - 1} (centro: $_currentPage) de ${_images.length}',
+    );
+
     final imageElements = _images
         .asMap()
         .entries
@@ -496,23 +531,38 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           final index = entry.key;
           final imageUrl = entry.value;
 
+          // Determinar si esta imagen debe renderizarse ahora o usar placeholder
+          final shouldRender = index >= startIndex && index < endIndex;
+
           // Calcular la prioridad de carga basada en la distancia a la página actual
           final distance = (index - _currentPage).abs();
           String loadingStrategy;
 
-          if (distance <= 2) {
-            // Páginas muy cercanas: carga inmediata
+          if (distance == 0) {
+            // Solo la página actual: carga inmediata
             loadingStrategy = 'eager';
-          } else if (distance <= 5) {
-            // Páginas cercanas: carga automática pero con menor prioridad
+          } else if (distance <= 2) {
+            // Páginas muy cercanas (±1-2): carga automática
             loadingStrategy = 'auto';
           } else {
-            // Páginas lejanas: carga solo cuando sea necesario
+            // Todas las demás: lazy (solo cuando sean visibles)
             loadingStrategy = 'lazy';
           }
 
+          // 🎯 Si no debe renderizarse, crear un placeholder ligero
+          if (!shouldRender) {
+            return '''
+      <div class="image-container placeholder" data-index="$index" data-rendered="false">
+        <div class="placeholder-content">
+          <div class="placeholder-text">Página ${index + 1}</div>
+        </div>
+      </div>
+    ''';
+          }
+
+          // ✅ Renderizar imagen completa
           return '''
-      <div class="image-container" data-index="$index">
+      <div class="image-container" data-index="$index" data-rendered="true">
         <img src="$imageUrl" 
              alt="Manga page $index" 
              class="manga-image"
@@ -578,6 +628,29 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           position: relative;
           min-height: 200px;
           background: #1a1a1a;
+        }
+        
+        /* Estilos para placeholders (imágenes no renderizadas) */
+        .image-container.placeholder {
+          min-height: 800px; /* Altura estimada promedio de una página de manga */
+          background: #0a0a0a;
+          border-top: 1px solid #2a2a2a;
+          border-bottom: 1px solid #2a2a2a;
+        }
+        
+        .placeholder-content {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          color: #666;
+          font-size: 14px;
+          text-align: center;
+          pointer-events: none;
+        }
+        
+        .placeholder-text {
+          font-family: Arial, sans-serif;
         }
         
         .manga-image {
@@ -690,23 +763,131 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       <script>
         let currentPage = $_currentPage;
         const MAX_RETRIES = $maxRetries;
+        const TOTAL_IMAGES = ${_images.length};
+        const RENDER_WINDOW = 10; // Ventana de renderizado expandida: actual ± 10
+        const RENDER_BUFFER = 3;  // Buffer antes de actualizar (evitar updates constantes)
+        const INITIAL_WINDOW = 5; // Ventana inicial pequeña para carga rápida
         let pageTrackerEnabled = false;  // Deshabilitar tracker hasta que se complete navegación inicial
         let criticalImagesLoaded = new Set();  // Track de imágenes críticas cargadas
         let contentShown = false;  // Flag para saber si ya se mostró el contenido
+        let lastRenderedRange = { start: ${(_currentPage - 5).clamp(0, _images.length)}, end: ${(_currentPage + 6).clamp(0, _images.length)} };
+        let initialLoadComplete = false; // Flag para saber si completamos la carga inicial
+        
+        // 🚀 SISTEMA DE RENDERIZADO VIRTUAL
+        // Renderiza dinámicamente solo las imágenes visibles y cercanas
+        function updateVirtualRendering(centerPage) {
+          const newStart = Math.max(0, centerPage - RENDER_WINDOW);
+          const newEnd = Math.min(TOTAL_IMAGES, centerPage + RENDER_WINDOW + 1);
+          
+          // Verificar si necesitamos actualizar (solo si nos movimos significativamente)
+          const distanceFromEdge = Math.min(
+            Math.abs(centerPage - lastRenderedRange.start),
+            Math.abs(centerPage - lastRenderedRange.end)
+          );
+          
+          if (distanceFromEdge < RENDER_BUFFER) {
+            return; // No actualizar aún, estamos dentro del buffer
+          }
+          
+          console.log('🔄 Actualizando renderizado virtual: centro=' + centerPage + ', rango=[' + newStart + ',' + newEnd + ')');
+          
+          // Actualizar rango
+          lastRenderedRange = { start: newStart, end: newEnd };
+          
+          // 1️⃣ Convertir a placeholders las imágenes fuera del rango
+          const allContainers = document.querySelectorAll('.image-container');
+          allContainers.forEach(container => {
+            const index = parseInt(container.getAttribute('data-index'));
+            const isRendered = container.getAttribute('data-rendered') === 'true';
+            const shouldBeRendered = index >= newStart && index < newEnd;
+            
+            if (isRendered && !shouldBeRendered) {
+              // Convertir a placeholder
+              convertToPlaceholder(container, index);
+            } else if (!isRendered && shouldBeRendered) {
+              // Renderizar imagen
+              renderImage(container, index);
+            }
+          });
+        }
+        
+        // Convierte un contenedor de imagen a placeholder (libera memoria)
+        function convertToPlaceholder(container, index) {
+          container.setAttribute('data-rendered', 'false');
+          container.classList.add('placeholder');
+          container.innerHTML = '<div class="placeholder-content"><div class="placeholder-text">Página ' + (index + 1) + '</div></div>';
+          
+          // Limpiar del caché de imágenes críticas
+          criticalImagesLoaded.delete(index);
+        }
+        
+        // Renderiza una imagen en un placeholder
+        function renderImage(container, index) {
+          container.setAttribute('data-rendered', 'true');
+          container.classList.remove('placeholder');
+          
+          const distance = Math.abs(index - currentPage);
+          let loadingStrategy = 'lazy';
+          if (distance <= 2) loadingStrategy = 'eager';
+          else if (distance <= 5) loadingStrategy = 'auto';
+          
+          const imageUrl = getImageUrl(index);
+          
+          container.innerHTML = \`
+            <img src="\${imageUrl}" 
+                 alt="Manga page \${index}" 
+                 class="manga-image"
+                 referrerpolicy="origin"
+                 loading="\${loadingStrategy}"
+                 decoding="async"
+                 data-retry-count="0"
+                 data-distance="\${distance}"
+                 onerror="handleImageError(this, \${index})"
+                 onload="handleImageLoad(this, \${index})" />
+            <div class="loading-overlay">
+              <div class="loading-text">Cargando imagen \${index + 1}...</div>
+              <div class="loading-spinner"></div>
+            </div>
+            <div class="error-overlay" style="display: none;">
+              <div class="error-icon">⚠️</div>
+              <div class="error-text">Error cargando imagen \${index + 1}</div>
+              <button class="retry-button" onclick="retryImage(\${index})">
+                🔄 Reintentar
+              </button>
+            </div>
+          \`;
+        }
+        
+        // Obtiene la URL de la imagen en el índice dado
+        function getImageUrl(index) {
+          const imageUrls = ${jsonEncode(_images)};
+          return imageUrls[index] || '';
+        }
         
         // Verificar si las imágenes críticas están cargadas
         function checkCriticalImagesLoaded() {
           if (contentShown) return;
           
           const targetPage = currentPage;
-          const criticalPages = [targetPage - 1, targetPage, targetPage + 1].filter(p => p >= 0 && p < ${_images.length});
+          // Solo esperar la página actual, no las adyacentes
+          const criticalPages = [targetPage].filter(p => p >= 0 && p < ${_images.length});
           
-          // Verificar si todas las páginas críticas están cargadas
+          // Verificar si la página actual está cargada
           const allCriticalLoaded = criticalPages.every(page => criticalImagesLoaded.has(page));
           
           if (allCriticalLoaded) {
+            console.log('✅ Página actual cargada, mostrando contenido');
             showContent();
             contentShown = true;
+            
+            // Expandir ventana de renderizado después de mostrar contenido
+            setTimeout(function() {
+              if (!initialLoadComplete) {
+                console.log('🔄 Expandiendo ventana de renderizado...');
+                updateVirtualRendering(currentPage);
+                initialLoadComplete = true;
+              }
+            }, 300);
           }
         }
         
@@ -789,6 +970,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         
         // Función para actualizar prioridades de carga basadas en la página actual
         function updateLoadingPriorities(centerPage) {
+          // Durante carga inicial, ser muy conservador
+          if (!initialLoadComplete) {
+            return; // No actualizar prioridades durante carga inicial
+          }
+          
           const allImages = document.querySelectorAll('.manga-image');
           
           // Optimización: usar fragment para cambios batch
@@ -798,8 +984,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             const distance = Math.abs(imgIndex - centerPage);
             
             // Actualizar estrategia de carga basada en distancia
-            if (distance <= 2) {
-              // Imágenes muy cercanas: forzar carga inmediata
+            if (distance <= 1) {
+              // Solo página actual y adyacentes inmediatas: carga inmediata
               if (img.loading !== 'eager') {
                 img.loading = 'eager';
                 // Si la imagen no ha empezado a cargar, forzar reload
@@ -807,12 +993,12 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                   img.src = img.getAttribute('src') || '';
                 }
               }
-            } else if (distance <= 5) {
+            } else if (distance <= 3) {
               // Imágenes cercanas: permitir carga automática
               if (img.loading === 'lazy') {
                 img.loading = 'auto';
               }
-            } else if (distance > 10) {
+            } else if (distance > 5) {
               // Imágenes lejanas: postponer carga
               if (img.loading === 'eager' || img.loading === 'auto') {
                 img.loading = 'lazy';
@@ -846,6 +1032,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           if (mostVisible !== null && currentPage !== mostVisible) {
             currentPage = mostVisible;
             
+            // 🚀 Actualizar renderizado virtual cuando cambia la página
+            updateVirtualRendering(currentPage);
+            
             // Notificar inmediatamente a Flutter
             if (window.flutter_inappwebview) {
               window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
@@ -873,14 +1062,14 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             if (entry.isIntersecting) {
               const index = parseInt(entry.target.getAttribute('data-index'));
               
-              // Actualizar prioridades de carga centradas en esta página
-              updateLoadingPriorities(index);
+              // Solo actualizar prioridades si ya completamos la carga inicial
+              if (initialLoadComplete) {
+                updateLoadingPriorities(index);
+              }
               
-              // Precargar solo 2 imágenes adelante y 1 atrás (reducido para performance)
-              for (let i = -1; i <= 2; i++) {
-                if (i === 0) continue;
-                
-                const targetIndex = index + i;
+              // Precargar solo 1 imagen adelante (muy conservador)
+              if (initialLoadComplete) {
+                const targetIndex = index + 1;
                 const targetContainer = document.querySelector('[data-index="' + targetIndex + '"]');
                 
                 if (targetContainer) {
@@ -893,7 +1082,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             }
           });
         }, { 
-          rootMargin: '200px', // Reducido de 300px a 200px
+          rootMargin: '150px', // Más reducido para evitar precarga agresiva
           threshold: [0] // Solo trigger cuando comienza a aparecer
         });
         
@@ -918,14 +1107,26 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Función para mostrar el contenido después del scroll inicial
         function showContent() {
           if (contentShown) return;
+          console.log('👁️ Mostrando contenido al usuario');
           document.body.classList.add('ready');
           contentShown = true;
         }
         
-        // Timeout de seguridad: mostrar contenido después de 2.5 segundos máximo
+        // Timeout de seguridad: mostrar contenido después de 1 segundo máximo
+        // Esto asegura que el usuario vea algo incluso si las imágenes tardan
         setTimeout(() => {
-          if (!contentShown) showContent();
-        }, 2500);
+          if (!contentShown) {
+            console.log('⏱️ Timeout: mostrando contenido sin esperar imágenes');
+            showContent();
+            // Expandir ventana de renderizado
+            setTimeout(function() {
+              if (!initialLoadComplete) {
+                updateVirtualRendering(currentPage);
+                initialLoadComplete = true;
+              }
+            }, 200);
+          }
+        }, 1000);
         
         // Inicializar prioridades de carga basadas en la página inicial
         function initializeLoadingPriorities() {
@@ -977,9 +1178,24 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Asegurar que el tracker esté habilitado para navegación manual
         pageTrackerEnabled = true;
         
+        // 🚀 Actualizar renderizado virtual ANTES de hacer scroll
+        if (typeof updateVirtualRendering === 'function') {
+          updateVirtualRendering($pageIndex);
+        }
+        
         const container = document.querySelector('[data-index="$pageIndex"]');
         if (container) {
-          container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Si es un placeholder, renderizarlo primero
+          if (container.getAttribute('data-rendered') === 'false') {
+            renderImage(container, $pageIndex);
+            // Dar tiempo para que se renderice
+            setTimeout(function() {
+              container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+          } else {
+            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          
           // Actualizar prioridades de carga
           if (typeof updateLoadingPriorities === 'function') {
             updateLoadingPriorities($pageIndex);
@@ -998,23 +1214,27 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
     final script = '''
       (function() {
+        console.log('🚀 Inicio navegación instantánea a página $pageIndex');
+        
         // Deshabilitar tracker temporalmente
         pageTrackerEnabled = false;
         
         const container = document.querySelector('[data-index="$pageIndex"]');
         if (container) {
-          // Hacer scroll instantáneo (invisible para el usuario porque body está oculto)
-          container.scrollIntoView({ behavior: 'instant', block: 'start' });
-          
-          // Forzar actualización del tracker
-          currentPage = $pageIndex;
-          
-          // Actualizar prioridades de carga inmediatamente
-          if (typeof updateLoadingPriorities === 'function') {
-            updateLoadingPriorities($pageIndex);
+          // Si es un placeholder, renderizarlo primero (solo la página actual)
+          if (container.getAttribute('data-rendered') === 'false') {
+            console.log('📄 Renderizando página $pageIndex');
+            renderImage(container, $pageIndex);
           }
           
-          // Notificar a Flutter del cambio
+          // PASO 1: Hacer scroll instantáneo INMEDIATAMENTE
+          console.log('📍 Haciendo scroll instantáneo a página $pageIndex');
+          container.scrollIntoView({ behavior: 'instant', block: 'start' });
+          
+          // PASO 2: Actualizar estado
+          currentPage = $pageIndex;
+          
+          // PASO 3: Notificar a Flutter INMEDIATAMENTE
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
               currentPage: $pageIndex,
@@ -1022,16 +1242,39 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             }));
           }
           
-          // Después del scroll, verificar si las imágenes críticas ya están listas
-          setTimeout(checkCriticalImagesLoaded, 100);
+          // PASO 4: Verificar y mostrar contenido rápidamente
+          setTimeout(function() {
+            checkCriticalImagesLoaded();
+            
+            // Si no se muestra en 200ms, forzar mostrar
+            setTimeout(function() {
+              if (!contentShown) {
+                console.log('⚡ Forzando mostrar contenido');
+                showContent();
+              }
+            }, 200);
+          }, 50);
           
-          // Habilitar tracker después de que todo esté listo
+          // PASO 5: Expandir renderizado DESPUÉS de mostrar contenido
+          setTimeout(function() {
+            console.log('🔄 Expandiendo ventana de renderizado');
+            if (typeof updateVirtualRendering === 'function') {
+              updateVirtualRendering($pageIndex);
+            }
+            if (typeof updateLoadingPriorities === 'function') {
+              updateLoadingPriorities($pageIndex);
+            }
+            initialLoadComplete = true;
+          }, 300);
+          
+          // PASO 6: Habilitar tracker después de que todo esté listo
           setTimeout(function() {
             pageTrackerEnabled = true;
-          }, 500);
+            console.log('✅ Navegación instantánea completa');
+          }, 600);
         } else {
-          // Mostrar contenido incluso si hay error (no esperar imágenes)
-          setTimeout(showContent, 100);
+          console.log('⚠️ Contenedor no encontrado, mostrando contenido');
+          showContent();
           pageTrackerEnabled = true;
         }
       })();
@@ -1440,9 +1683,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // WebView terminó de cargar
         await _injectImageInterceptor();
 
-        // Pequeño delay para asegurar que el DOM esté listo
-        await Future.delayed(const Duration(milliseconds: 200));
-
+        // NO esperar, ejecutar inmediatamente
         // Si hay una página guardada, navegar instantáneamente (showContent se llama automáticamente)
         if (_currentPage > 0) {
           print('🎯 Navegando a página guardada: $_currentPage');
