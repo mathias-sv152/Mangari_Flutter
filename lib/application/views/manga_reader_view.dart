@@ -9,7 +9,6 @@ import 'package:mangari/core/di/service_locator.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:async';
 
 enum ImageLoadState { loading, loaded, error, retrying }
@@ -69,12 +68,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   // Cliente HTTP reutilizable con timeout
   late final http.Client _httpClient;
 
-  // Cache de imágenes en memoria para evitar múltiples descargas
-  final Map<String, Uint8List> _imageCache = {};
-
-  // Debouncing para updateCurrentPage
-  DateTime _lastPageUpdate = DateTime.now();
-
   // Timer para guardar progreso periódicamente
   Timer? _progressSaveTimer;
 
@@ -105,7 +98,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
     // Limpiar recursos
     _httpClient.close();
-    _imageCache.clear();
     _webViewController?.dispose();
 
     // Restaurar la UI del sistema al salir
@@ -170,17 +162,25 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         );
 
         if (savedPage > 0 && savedPage < _images.length) {
-          setState(() {
-            _currentPage = savedPage;
-          });
-
-          // Navegar a la página guardada después de un pequeño delay
-          await Future.delayed(const Duration(milliseconds: 500));
-          _navigateToPage(savedPage);
+          // Actualizar el estado ANTES de cargar el HTML
+          _currentPage = savedPage;
+          print('✅ Página inicial configurada: $_currentPage');
         }
+      } else {
+        print('ℹ️ No hay progreso guardado, iniciando en página 0');
+      }
+
+      // Ahora sí cargar el HTML con el _currentPage correcto
+      if (_webViewController != null && _images.isNotEmpty) {
+        print('🔄 Cargando HTML con página inicial: $_currentPage');
+        _loadHtmlContent();
       }
     } catch (e) {
       print('❌ Error cargando progreso de lectura: $e');
+      // Incluso si hay error, cargar el HTML
+      if (_webViewController != null && _images.isNotEmpty) {
+        _loadHtmlContent();
+      }
     }
   }
 
@@ -212,7 +212,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     });
   }
 
-  /// Actualiza el progreso cuando cambia la página actual
+  /// Actualiza el progreso cuando cambia la página actual (solo desde el slider)
   void _updateCurrentPageProgress(int newPage) {
     if (_currentPage == newPage) return;
 
@@ -220,13 +220,17 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       _currentPage = newPage;
     });
 
-    // Guardar progreso inmediatamente al cambiar de página
-    _saveReadingProgress();
+    // Guardar progreso después de un pequeño delay para evitar guardados excesivos
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_currentPage == newPage) {
+        _saveReadingProgress();
 
-    // Si llegó a la última página, marcar como completado
-    if (newPage >= _images.length - 1) {
-      _markChapterAsCompleted();
-    }
+        // Si llegó a la última página, marcar como completado
+        if (newPage >= _images.length - 1) {
+          _markChapterAsCompleted();
+        }
+      }
+    });
   }
 
   /// Marca el capítulo como completado
@@ -410,10 +414,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       });
 
-      // Si el WebView ya está creado, cargar el contenido
-      if (_webViewController != null && _images.isNotEmpty) {
-        _loadHtmlContent();
-      }
+      print('✅ Imágenes cargadas: ${images.length}');
+      // NO cargar HTML aquí, esperar a que _loadReadingProgress configure _currentPage
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
@@ -468,9 +470,21 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   }
 
   void _loadHtmlContent() {
+    if (_webViewController == null) {
+      print('⚠️ WebView no está listo aún, esperando...');
+      return;
+    }
+
+    if (_images.isEmpty) {
+      print('⚠️ No hay imágenes cargadas aún, esperando...');
+      return;
+    }
+
     final htmlContent = _generateHtmlContent();
-    print('Loading HTML content with ${_images.length} images');
-    print('🔍 Using referer: ${widget.referer}');
+    print(
+      '🔄 Cargando HTML con ${_images.length} imágenes, página inicial: $_currentPage',
+    );
+    print('🔍 Usando referer: ${widget.referer}');
     _webViewController?.loadData(data: htmlContent);
   }
 
@@ -481,15 +495,32 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         .map((entry) {
           final index = entry.key;
           final imageUrl = entry.value;
+
+          // Calcular la prioridad de carga basada en la distancia a la página actual
+          final distance = (index - _currentPage).abs();
+          String loadingStrategy;
+
+          if (distance <= 2) {
+            // Páginas muy cercanas: carga inmediata
+            loadingStrategy = 'eager';
+          } else if (distance <= 5) {
+            // Páginas cercanas: carga automática pero con menor prioridad
+            loadingStrategy = 'auto';
+          } else {
+            // Páginas lejanas: carga solo cuando sea necesario
+            loadingStrategy = 'lazy';
+          }
+
           return '''
       <div class="image-container" data-index="$index">
         <img src="$imageUrl" 
              alt="Manga page $index" 
              class="manga-image"
              referrerpolicy="origin"
-             loading="${index < 5 ? 'eager' : 'lazy'}"
+             loading="$loadingStrategy"
              decoding="async"
              data-retry-count="0"
+             data-distance="$distance"
              onerror="handleImageError(this, $index)"
              onload="handleImageLoad(this, $index)" />
         <div class="loading-overlay">
@@ -529,6 +560,14 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           min-height: 100vh;
           overflow-x: hidden;
           touch-action: manipulation;
+          visibility: hidden;
+          opacity: 0;
+          transition: opacity 0.4s ease-in-out;
+        }
+        
+        body.ready {
+          visibility: visible;
+          opacity: 1;
         }
         
         .image-container {
@@ -649,15 +688,37 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       $imageElements
       
       <script>
-        let currentPage = 0;
+        let currentPage = $_currentPage;
         const MAX_RETRIES = $maxRetries;
+        let pageTrackerEnabled = false;  // Deshabilitar tracker hasta que se complete navegación inicial
+        let criticalImagesLoaded = new Set();  // Track de imágenes críticas cargadas
+        let contentShown = false;  // Flag para saber si ya se mostró el contenido
         
-        // Manejo de carga de imagen
+        // Verificar si las imágenes críticas están cargadas
+        function checkCriticalImagesLoaded() {
+          if (contentShown) return;
+          
+          const targetPage = currentPage;
+          const criticalPages = [targetPage - 1, targetPage, targetPage + 1].filter(p => p >= 0 && p < ${_images.length});
+          
+          // Verificar si todas las páginas críticas están cargadas
+          const allCriticalLoaded = criticalPages.every(page => criticalImagesLoaded.has(page));
+          
+          if (allCriticalLoaded) {
+            showContent();
+            contentShown = true;
+          }
+        }
+        
+        // Manejo de carga de imagen (optimizado - menos logs)
         function handleImageLoad(img, index) {
-          console.log('✅ Imagen ' + index + ' cargada correctamente');
           img.classList.add('loaded');
           img.parentElement.classList.add('image-loaded');
           img.parentElement.querySelector('.loading-overlay').style.display = 'none';
+          
+          // Marcar como cargada y verificar si es crítica
+          criticalImagesLoaded.add(index);
+          checkCriticalImagesLoaded();
           
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('ImageLoaded', JSON.stringify({
@@ -666,12 +727,10 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           }
         }
         
-        // Manejo de error de imagen
+        // Manejo de error de imagen (optimizado)
         function handleImageError(img, index) {
           const container = img.parentElement;
           const retryCount = parseInt(img.getAttribute('data-retry-count') || '0');
-          
-          console.log('❌ Error en imagen ' + index + ' (intento ' + (retryCount + 1) + '/' + MAX_RETRIES + ')');
           
           if (retryCount < MAX_RETRIES) {
             // Retry automático
@@ -705,7 +764,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         
         // Retry manual de imagen
         function retryImage(index) {
-          console.log('🔄 Retry manual de imagen ' + index);
           
           const container = document.querySelector('[data-index="' + index + '"]');
           if (!container) return;
@@ -729,58 +787,117 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           }
         }
         
-        // Usar Intersection Observer para tracking eficiente
-        let updateTimeout = null;
-        const observer = new IntersectionObserver((entries) => {
-          entries.forEach(entry => {
-            if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
-              const index = parseInt(entry.target.getAttribute('data-index'));
-              if (currentPage !== index) {
-                currentPage = index;
-                
-                // Debounce updates
-                if (updateTimeout) clearTimeout(updateTimeout);
-                updateTimeout = setTimeout(() => {
-                  if (window.flutter_inappwebview) {
-                    window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
-                      currentPage: currentPage,
-                      totalPages: document.querySelectorAll('.image-container').length
-                    }));
-                  }
-                }, 100);
+        // Función para actualizar prioridades de carga basadas en la página actual
+        function updateLoadingPriorities(centerPage) {
+          const allImages = document.querySelectorAll('.manga-image');
+          
+          // Optimización: usar fragment para cambios batch
+          allImages.forEach(img => {
+            const container = img.parentElement;
+            const imgIndex = parseInt(container.getAttribute('data-index'));
+            const distance = Math.abs(imgIndex - centerPage);
+            
+            // Actualizar estrategia de carga basada en distancia
+            if (distance <= 2) {
+              // Imágenes muy cercanas: forzar carga inmediata
+              if (img.loading !== 'eager') {
+                img.loading = 'eager';
+                // Si la imagen no ha empezado a cargar, forzar reload
+                if (!img.complete && !img.src) {
+                  img.src = img.getAttribute('src') || '';
+                }
+              }
+            } else if (distance <= 5) {
+              // Imágenes cercanas: permitir carga automática
+              if (img.loading === 'lazy') {
+                img.loading = 'auto';
+              }
+            } else if (distance > 10) {
+              // Imágenes lejanas: postponer carga
+              if (img.loading === 'eager' || img.loading === 'auto') {
+                img.loading = 'lazy';
               }
             }
           });
+        }
+        
+        // Usar Intersection Observer para tracking eficiente de página actual
+        const pageTracker = new IntersectionObserver((entries) => {
+          // Si el tracker está deshabilitado, ignorar
+          if (!pageTrackerEnabled) {
+            return;
+          }
+          
+          // Buscar la entrada más visible
+          let mostVisible = null;
+          let maxRatio = 0;
+          
+          entries.forEach(entry => {
+            const index = parseInt(entry.target.getAttribute('data-index'));
+            
+            // Considerar entrada si está intersectando
+            if (entry.isIntersecting && entry.intersectionRatio >= maxRatio) {
+              maxRatio = entry.intersectionRatio;
+              mostVisible = index;
+            }
+          });
+          
+          // Actualizar si encontramos una página visible y es diferente
+          if (mostVisible !== null && currentPage !== mostVisible) {
+            currentPage = mostVisible;
+            
+            // Notificar inmediatamente a Flutter
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
+                currentPage: currentPage,
+                totalPages: document.querySelectorAll('.image-container').length
+              }));
+            }
+          }
         }, {
-          threshold: [0.5],
+          // Reducir thresholds para mejor performance
+          threshold: [0, 0.25, 0.5, 0.75, 1.0],
+          // Sin margen para que solo cuente lo visible en pantalla
           rootMargin: '0px'
         });
         
-        // Observar todos los contenedores de imágenes
-        document.querySelectorAll('.image-container').forEach(container => {
-          observer.observe(container);
+        // Observar todos los contenedores de imágenes para tracking
+        const containers = document.querySelectorAll('.image-container');
+        containers.forEach(container => {
+          pageTracker.observe(container);
         });
         
-        // Precargar imágenes cercanas cuando una imagen sea visible
+        // Precargar imágenes cercanas cuando una imagen sea visible (optimizado)
         const preloadObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
             if (entry.isIntersecting) {
               const index = parseInt(entry.target.getAttribute('data-index'));
-              // Precargar 2 imágenes adelante
-              for (let i = 1; i <= 2; i++) {
-                const nextContainer = document.querySelector('[data-index=\"' + (index + i) + '\"]');
-                if (nextContainer) {
-                  const img = nextContainer.querySelector('img');
-                  if (img && img.loading === 'lazy') {
+              
+              // Actualizar prioridades de carga centradas en esta página
+              updateLoadingPriorities(index);
+              
+              // Precargar solo 2 imágenes adelante y 1 atrás (reducido para performance)
+              for (let i = -1; i <= 2; i++) {
+                if (i === 0) continue;
+                
+                const targetIndex = index + i;
+                const targetContainer = document.querySelector('[data-index="' + targetIndex + '"]');
+                
+                if (targetContainer) {
+                  const img = targetContainer.querySelector('img');
+                  if (img && !img.complete && img.loading !== 'eager') {
                     img.loading = 'eager';
                   }
                 }
               }
             }
           });
-        }, { rootMargin: '200px' });
+        }, { 
+          rootMargin: '200px', // Reducido de 300px a 200px
+          threshold: [0] // Solo trigger cuando comienza a aparecer
+        });
         
-        document.querySelectorAll('.image-container').forEach(container => {
+        containers.forEach(container => {
           preloadObserver.observe(container);
         });
         
@@ -798,13 +915,32 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           e.preventDefault();
         });
         
-        // Initialize
-        setTimeout(updateCurrentPage, 100);
+        // Función para mostrar el contenido después del scroll inicial
+        function showContent() {
+          if (contentShown) return;
+          document.body.classList.add('ready');
+          contentShown = true;
+        }
         
-        console.log('📱 Manga Reader inicializado');
-        console.log('🔗 Referer: ${widget.referer}');
-        console.log('📄 Total de páginas: ${_images.length}');
-        console.log('🔄 Max retries: ' + MAX_RETRIES);
+        // Timeout de seguridad: mostrar contenido después de 2.5 segundos máximo
+        setTimeout(() => {
+          if (!contentShown) showContent();
+        }, 2500);
+        
+        // Inicializar prioridades de carga basadas en la página inicial
+        function initializeLoadingPriorities() {
+          const initialPage = currentPage || 0;
+          updateLoadingPriorities(initialPage);
+        }
+        
+        // Esperar a que el DOM esté listo (optimizado)
+        if (document.readyState === 'complete') {
+          requestAnimationFrame(initializeLoadingPriorities);
+        } else {
+          window.addEventListener('load', () => {
+            requestAnimationFrame(initializeLoadingPriorities);
+          });
+        }
       </script>
     </body>
     </html>
@@ -838,9 +974,65 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
     final script = '''
       (function() {
+        // Asegurar que el tracker esté habilitado para navegación manual
+        pageTrackerEnabled = true;
+        
         const container = document.querySelector('[data-index="$pageIndex"]');
         if (container) {
           container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Actualizar prioridades de carga
+          if (typeof updateLoadingPriorities === 'function') {
+            updateLoadingPriorities($pageIndex);
+          }
+        }
+      })();
+    ''';
+
+    _webViewController?.evaluateJavascript(source: script);
+  }
+
+  void _navigateToPageInstantly(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= _images.length) return;
+
+    print('🚀 Navegando instantáneamente a página $pageIndex');
+
+    final script = '''
+      (function() {
+        // Deshabilitar tracker temporalmente
+        pageTrackerEnabled = false;
+        
+        const container = document.querySelector('[data-index="$pageIndex"]');
+        if (container) {
+          // Hacer scroll instantáneo (invisible para el usuario porque body está oculto)
+          container.scrollIntoView({ behavior: 'instant', block: 'start' });
+          
+          // Forzar actualización del tracker
+          currentPage = $pageIndex;
+          
+          // Actualizar prioridades de carga inmediatamente
+          if (typeof updateLoadingPriorities === 'function') {
+            updateLoadingPriorities($pageIndex);
+          }
+          
+          // Notificar a Flutter del cambio
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('PageTracker', JSON.stringify({
+              currentPage: $pageIndex,
+              totalPages: document.querySelectorAll('.image-container').length
+            }));
+          }
+          
+          // Después del scroll, verificar si las imágenes críticas ya están listas
+          setTimeout(checkCriticalImagesLoaded, 100);
+          
+          // Habilitar tracker después de que todo esté listo
+          setTimeout(function() {
+            pageTrackerEnabled = true;
+          }, 500);
+        } else {
+          // Mostrar contenido incluso si hay error (no esperar imágenes)
+          setTimeout(showContent, 100);
+          pageTrackerEnabled = true;
         }
       })();
     ''';
@@ -1126,39 +1318,64 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         useShouldOverrideUrlLoading: true,
         mediaPlaybackRequiresUserGesture: false,
         transparentBackground: false,
-        // Optimizaciones de rendimiento
-        cacheEnabled: true,
-        clearCache: false,
+        // 🚀 Optimizaciones de rendimiento - CACHE DESHABILITADA
+        cacheEnabled: false,
+        clearCache: true,
         disableContextMenu: true,
         minimumFontSize: 1,
         // Mejoras de carga de imágenes
         loadsImagesAutomatically: true,
         useWideViewPort: true,
         loadWithOverviewMode: true,
+        // Deshabilitar recursos innecesarios para mejor performance
+        javaScriptCanOpenWindowsAutomatically: false,
+        horizontalScrollBarEnabled: false,
         // Seguridad
         allowContentAccess: true,
         allowFileAccess: true,
         // IMPORTANTE: Habilitar interceptor de recursos
         useShouldInterceptRequest: true,
       ),
-      onWebViewCreated: (controller) {
+      onWebViewCreated: (controller) async {
         _webViewController = controller;
 
         // Agregar JavaScript handlers
         controller.addJavaScriptHandler(
           handlerName: 'PageTracker',
           callback: (args) {
-            final now = DateTime.now();
-            // Debouncing: solo actualizar si han pasado 100ms
-            if (now.difference(_lastPageUpdate).inMilliseconds < 100) return;
+            try {
+              final message = args[0] as String;
+              final pageData = jsonDecode(message);
+              final newPage = pageData['currentPage'] ?? 0;
 
-            final message = args[0] as String;
-            final pageData = jsonDecode(message);
-            final newPage = pageData['currentPage'] ?? 0;
+              print(
+                '📄 PageTracker recibido: página $newPage (actual: $_currentPage)',
+              );
 
-            if (_currentPage != newPage) {
-              _lastPageUpdate = now;
-              _updateCurrentPageProgress(newPage);
+              if (_currentPage != newPage) {
+                print('✅ Actualizando página: $_currentPage → $newPage');
+
+                // Actualizar inmediatamente para que el slider se sincronice
+                if (mounted) {
+                  setState(() {
+                    _currentPage = newPage;
+                  });
+                }
+
+                // Guardar progreso de forma diferida (sin bloquear UI)
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (_currentPage == newPage) {
+                    _saveReadingProgress();
+
+                    // Si llegó a la última página, marcar como completado
+                    if (newPage >= _images.length - 1) {
+                      _markChapterAsCompleted();
+                    }
+                  }
+                });
+              }
+            } catch (e) {
+              print('❌ Error en PageTracker handler: $e');
             }
           },
         );
@@ -1205,17 +1422,51 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           },
         );
 
-        // Cargar el contenido HTML después de configurar los handlers
+        print('✅ WebView creado y handlers configurados');
+
+        // Si las imágenes ya están cargadas, intentar cargar el HTML
+        // (esto maneja el caso en que el WebView se crea tarde)
         if (_images.isNotEmpty) {
-          _loadHtmlContent();
+          print('🔄 Imágenes ya disponibles, intentando cargar HTML...');
+          // Dar un pequeño delay para que _loadReadingProgress pueda ejecutarse primero
+          Future.delayed(const Duration(milliseconds: 100), () {
+            _loadHtmlContent();
+          });
         }
       },
       onLoadStop: (controller, url) async {
+        print('🔄 WebView cargado, página actual: $_currentPage');
+
         // WebView terminó de cargar
         await _injectImageInterceptor();
+
+        // Pequeño delay para asegurar que el DOM esté listo
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        // Si hay una página guardada, navegar instantáneamente (showContent se llama automáticamente)
+        if (_currentPage > 0) {
+          print('🎯 Navegando a página guardada: $_currentPage');
+          _navigateToPageInstantly(_currentPage);
+        } else {
+          // Si no hay progreso guardado (página 0), verificar imágenes críticas y habilitar tracker
+          print(
+            'ℹ️ Sin progreso guardado, verificando imágenes críticas en página 0',
+          );
+          final showScript = '''
+            (function() {
+              // Habilitar tracker inmediatamente ya que no hay scroll
+              pageTrackerEnabled = true;
+              // Verificar si las imágenes críticas ya están cargadas
+              checkCriticalImagesLoaded();
+            })();
+          ''';
+          await controller.evaluateJavascript(source: showScript);
+        }
       },
       onConsoleMessage: (controller, consoleMessage) {
-        print('WebView Console: ${consoleMessage.message}');
+        // Console logs deshabilitados para mejor performance
+        // Descomentar solo para debugging:
+        // print('WebView Console: ${consoleMessage.message}');
       },
       shouldInterceptRequest: (controller, request) async {
         final url = request.url.toString();
@@ -1228,16 +1479,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
 
         try {
-          // Verificar cache primero
-          if (_imageCache.containsKey(url)) {
-            return WebResourceResponse(
-              contentType: 'image/jpeg',
-              data: _imageCache[url]!,
-              statusCode: 200,
-            );
-          }
-
-          // Realizar petición con timeout y el cliente reutilizable
+          // Realizar petición directa sin caché para mejor performance
           final response = await _httpClient
               .get(
                 Uri.parse(url),
@@ -1249,20 +1491,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                       'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
                 },
               )
-              .timeout(const Duration(seconds: 15));
+              .timeout(const Duration(seconds: 10)); // Reducido timeout a 10s
 
           if (response.statusCode == 200) {
-            // Cachear solo si el tamaño es razonable (< 5MB)
-            if (response.bodyBytes.length < 5 * 1024 * 1024) {
-              _imageCache[url] = Uint8List.fromList(response.bodyBytes);
-
-              // Limitar cache a 50 imágenes para evitar OOM
-              if (_imageCache.length > 50) {
-                final firstKey = _imageCache.keys.first;
-                _imageCache.remove(firstKey);
-              }
-            }
-
             return WebResourceResponse(
               contentType: response.headers['content-type'] ?? 'image/jpeg',
               data: response.bodyBytes,
