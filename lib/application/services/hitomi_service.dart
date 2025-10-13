@@ -330,15 +330,22 @@ class HitomiService implements IMangaService {
   Future<List<MangaEntity>> searchManga(String query, {int page = 1}) async {
     try {
       print('🔍 Searching Hitomi for: "$query" (page $page)');
-      
+
+      // Preparar la query con formato de Hitomi
+      final formattedQuery = _formatSearchQuery(query);
+      print('📝 Formatted query: "$formattedQuery"');
+
       // Usar el método de búsqueda del repositorio
-      final galleries = await _hitomiRepository.searchManga(query, page);
+      final galleries = await _hitomiRepository.searchManga(
+        formattedQuery,
+        page,
+      );
       final formattedList = _formatListManga(galleries);
-      
+
       print('✅ Found ${formattedList.length} results for "$query"');
       return formattedList;
     } catch (error) {
-      print('Error en HitomiService searchManga: $error');
+      print('❌ Error en HitomiService searchManga: $error');
       return [];
     }
   }
@@ -404,9 +411,13 @@ class HitomiService implements IMangaService {
       print('  🔢 Page: $page');
       print('  📊 OrderBy: $orderBy, Key: $orderByKey');
 
+      // Construir query completa con filtros de ordenamiento
+      String fullQuery = _buildFilterQuery(searchText, orderBy, orderByKey);
+      print('  🔗 Full query: "$fullQuery"');
+
       // Usar el método con filtros
       final galleries = await _hitomiRepository.searchMangaWithFilters(
-        searchText,
+        fullQuery,
         page,
         orderBy: orderBy,
         orderByKey: orderByKey,
@@ -414,7 +425,7 @@ class HitomiService implements IMangaService {
 
       final formattedList = _formatListManga(galleries);
       print('✅ Hitomi: Found ${formattedList.length} results');
-      
+
       return formattedList;
     } catch (error) {
       print('❌ Error en HitomiService applyFilter: $error');
@@ -430,7 +441,7 @@ class HitomiService implements IMangaService {
 
     // Procesar filtro de ordenamiento
     final orderByValue = selectedFilters['orderBy'] as String?;
-    
+
     if (orderByValue != null) {
       // Mapear los valores del filtro a los parámetros del repositorio
       switch (orderByValue) {
@@ -461,5 +472,55 @@ class HitomiService implements IMangaService {
     }
 
     return params;
+  }
+
+  /// Formatea una query de búsqueda al formato esperado por Hitomi
+  String _formatSearchQuery(String query) {
+    if (query.trim().isEmpty) return '';
+
+    // Por defecto, agregar language:spanish si no se especifica otro idioma
+    final formattedQuery = query.trim().toLowerCase();
+
+    // Si no contiene language: y no está vacía, agregar language:spanish
+    if (!formattedQuery.contains('language:') && formattedQuery.isNotEmpty) {
+      return 'language:spanish $formattedQuery';
+    }
+
+    return formattedQuery;
+  }
+
+  /// Construye una query completa con filtros de ordenamiento según el formato de Hitomi
+  String _buildFilterQuery(
+    String searchText,
+    String? orderBy,
+    String? orderByKey,
+  ) {
+    final queryParts = <String>[];
+
+    // Agregar texto de búsqueda formateado
+    if (searchText.isNotEmpty) {
+      queryParts.add(_formatSearchQuery(searchText));
+    } else {
+      // Si no hay texto de búsqueda, usar language:spanish por defecto
+      queryParts.add('language:spanish');
+    }
+
+    // Agregar parámetros de ordenamiento según el formato de Hitomi
+    if (orderBy != null && orderByKey != null) {
+      switch (orderBy) {
+        case 'popular':
+          queryParts.add('orderby:popular');
+          queryParts.add('orderbykey:$orderByKey');
+          break;
+        case 'date':
+          if (orderByKey == 'published') {
+            queryParts.add('orderby:datepublished');
+          }
+          // Para 'added' no se necesita parámetro adicional
+          break;
+      }
+    }
+
+    return queryParts.join(' ');
   }
 }
