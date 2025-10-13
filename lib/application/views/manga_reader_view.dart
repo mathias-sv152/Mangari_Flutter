@@ -51,7 +51,6 @@ class MangaReaderView extends StatefulWidget {
 
 class _MangaReaderViewState extends State<MangaReaderView> {
   static const int maxRetries = 3;
-  static const int retryDelayMs = 1000;
 
   ServersServiceV2? _serversService;
   DatabaseService? _databaseService;
@@ -114,19 +113,16 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   void _initializeService() async {
     try {
-      print('🔍 MangaReaderView: Intentando obtener ServersServiceV2...');
       await Future.delayed(const Duration(milliseconds: 50));
 
       _serversService = getServersServiceSafely();
       _databaseService = DatabaseService();
 
       if (_serversService != null) {
-        print('✅ MangaReaderView: ServersServiceV2 obtenido correctamente');
         await _loadChapterImages();
         await _loadReadingProgress();
         _startProgressSaveTimer();
       } else {
-        print('❌ MangaReaderView: No se pudo obtener ServersServiceV2');
         if (mounted) {
           setState(() {
             _errorMessage = 'No se pudo inicializar el servicio de servidores';
@@ -135,7 +131,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       }
     } catch (e) {
-      print('❌ MangaReaderView: Error en _initializeService: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Error inicializando servicios: $e';
@@ -161,26 +156,18 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
       if (progress != null && mounted) {
         final savedPage = progress['current_page'] as int;
-        print(
-          '📖 Progreso cargado: página $savedPage de ${progress['total_pages']}',
-        );
 
         if (savedPage > 0 && savedPage < _images.length) {
           // Actualizar el estado ANTES de cargar el HTML
           _currentPage = savedPage;
-          print('✅ Página inicial configurada: $_currentPage');
         }
-      } else {
-        print('ℹ️ No hay progreso guardado, iniciando en página 0');
       }
 
       // Ahora sí cargar el HTML con el _currentPage correcto
       if (_webViewController != null && _images.isNotEmpty) {
-        print('🔄 Cargando HTML con página inicial: $_currentPage');
         _loadHtmlContent();
       }
     } catch (e) {
-      print('❌ Error cargando progreso de lectura: $e');
       // Incluso si hay error, cargar el HTML
       if (_webViewController != null && _images.isNotEmpty) {
         _loadHtmlContent();
@@ -202,10 +189,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         currentPage: _currentPage,
         totalPages: _images.length,
       );
-
-      print('💾 Progreso guardado: página $_currentPage de ${_images.length}');
     } catch (e) {
-      print('❌ Error guardando progreso: $e');
+      // Error silencioso
     }
   }
 
@@ -230,7 +215,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     // Usar debounce para evitar navegaciones excesivas durante arrastre del slider
     _sliderNavigationTimer = Timer(const Duration(milliseconds: 200), () {
       if (_currentPage == newPage && mounted) {
-        print('🎚️ Ejecutando navegación de slider a página $newPage');
         _navigateToPageFromSlider(newPage);
 
         // Guardar progreso después de la navegación
@@ -261,10 +245,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         editorial: widget.chapter.editorialName,
         totalPages: _images.length,
       );
-
-      print('✅ Capítulo marcado como completado');
     } catch (e) {
-      print('❌ Error marcando capítulo como completado: $e');
+      // Error silencioso
     }
   }
 
@@ -288,37 +270,45 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void _handleImageError(int index, String error) {
     if (!mounted || !_imageStates.containsKey(index)) return;
 
-    final imageState = _imageStates[index]!;
+    try {
+      final dynamic errorData = jsonDecode(error);
+      final int retryCount = errorData['retryCount'] ?? 0;
+      final bool isRetrying = errorData['isRetrying'] ?? false;
+      final bool isFinalError = errorData['isFinalError'] ?? false;
+      final String errorMsg = errorData['error'] ?? 'Error desconocido';
 
-    if (imageState.retryCount < maxRetries) {
-      // Retry automático
-      imageState.state = ImageLoadState.retrying;
-      imageState.retryCount++;
-      imageState.errorMessage =
-          'Reintentando... (${imageState.retryCount}/$maxRetries)';
-      _invalidateCountCache();
+      // Error procesado silenciosamente
 
-      // Solo setState si es visible
-      if ((index - _currentPage).abs() <= 3) {
-        setState(() {});
+      final imageState = _imageStates[index]!;
+
+      if (isRetrying) {
+        // Imagen está reintentando automáticamente
+        imageState.state = ImageLoadState.retrying;
+        imageState.retryCount = retryCount;
+        imageState.errorMessage = 'Reintentando... ($retryCount/$maxRetries)';
+      } else if (isFinalError) {
+        // Error final después de todos los reintentos
+        imageState.state = ImageLoadState.error;
+        imageState.retryCount = retryCount;
+        imageState.errorMessage = 'Error después de $maxRetries intentos';
+      } else {
+        // Error genérico
+        imageState.state = ImageLoadState.error;
+        imageState.retryCount = retryCount;
+        imageState.errorMessage = errorMsg;
       }
 
-      // Esperar antes de reintentar
-      Future.delayed(
-        Duration(milliseconds: retryDelayMs * imageState.retryCount),
-        () {
-          if (mounted) {
-            _retryImageLoad(index);
-          }
-        },
-      );
-    } else {
-      // Falló después de todos los intentos
+      // Solo setState si es visible
+      if ((index - _currentPage).abs() <= 5) {
+        setState(() {});
+      }
+    } catch (e) {
+      // Fallback si no es JSON válido
+      final imageState = _imageStates[index]!;
       imageState.state = ImageLoadState.error;
-      imageState.errorMessage = 'Error después de $maxRetries intentos';
-      _invalidateCountCache();
+      imageState.errorMessage = error;
 
-      if ((index - _currentPage).abs() <= 3) {
+      if ((index - _currentPage).abs() <= 5) {
         setState(() {});
       }
     }
@@ -327,33 +317,16 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void _retryImageLoad(int index) {
     if (!mounted || !_imageStates.containsKey(index)) return;
 
-    print('🔄 Reintentando carga de imagen $index...');
+    // Solicitando reintento silenciosamente
 
+    // Llamar a la función JavaScript de reintento manual
     final script = '''
       (function() {
-        const container = document.querySelector('[data-index="$index"]');
-        if (!container) return;
-        
-        // Si es un placeholder, renderizarlo primero
-        if (container.getAttribute('data-rendered') === 'false') {
-          renderImage(container, $index);
-          return;
-        }
-        
-        const img = container.querySelector('img');
-        const overlay = container.querySelector('.loading-overlay');
-        
-        if (img && overlay) {
-          overlay.textContent = 'Reintentando... (${_imageStates[index]!.retryCount}/$maxRetries)';
-          overlay.style.display = 'block';
-          overlay.style.color = '#f1fa8c';
-          
-          // Forzar recarga
-          const currentSrc = img.src;
-          img.src = '';
-          setTimeout(() => {
-            img.src = currentSrc + '?retry=' + Date.now();
-          }, 100);
+        console.log('📱 Flutter solicitó reintento de imagen $index');
+        if (typeof retryImage === 'function') {
+          retryImage($index);
+        } else {
+          console.log('❌ Función retryImage no disponible');
         }
       })();
     ''';
@@ -364,46 +337,17 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   void _retryImageManually(int index) {
     if (!mounted || !_imageStates.containsKey(index)) return;
 
-    print('🔄 Retry manual de imagen $index');
+    // Reintento manual procesándose
 
+    // Resetear estado en Flutter
     setState(() {
       _imageStates[index]!.state = ImageLoadState.loading;
       _imageStates[index]!.retryCount = 0;
       _imageStates[index]!.errorMessage = null;
     });
 
+    // JavaScript maneja el reintento real
     _retryImageLoad(index);
-  }
-
-  void _retryAllFailedImages() {
-    final failedImages =
-        _imageStates.entries
-            .where((entry) => entry.value.state == ImageLoadState.error)
-            .map((entry) => entry.key)
-            .toList();
-
-    if (failedImages.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No hay imágenes con errores'),
-          backgroundColor: DraculaTheme.green,
-        ),
-      );
-      return;
-    }
-
-    print('🔄 Reintentando ${failedImages.length} imágenes fallidas...');
-
-    for (final index in failedImages) {
-      _retryImageManually(index);
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Reintentando ${failedImages.length} imagen(es)...'),
-        backgroundColor: DraculaTheme.purple,
-      ),
-    );
   }
 
   Future<void> _loadChapterImages() async {
@@ -415,10 +359,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         _errorMessage = null;
         _imageStates.clear();
       });
-
-      print(
-        '🔍 MangaReaderView: Usando servidor ${widget.server.id} con referer ${widget.referer}',
-      );
 
       final images = await _serversService!.getChapterImagesFromServer(
         widget.server.id,
@@ -434,8 +374,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           _imageStates[i] = ImageState(url: images[i]);
         }
       });
-
-      print('✅ Imágenes cargadas: ${images.length}');
       // NO cargar HTML aquí, esperar a que _loadReadingProgress configure _currentPage
     } catch (e) {
       setState(() {
@@ -492,31 +430,14 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   void _loadHtmlContent() {
     if (_webViewController == null) {
-      print('⚠️ WebView no está listo aún, esperando...');
       return;
     }
 
     if (_images.isEmpty) {
-      print('⚠️ No hay imágenes cargadas aún, esperando...');
       return;
     }
 
     final htmlContent = _generateHtmlContent();
-    print(
-      '🔄 Cargando HTML con ${_images.length} imágenes, página inicial: $_currentPage',
-    );
-
-    // Advertencia si el capítulo tiene muchas imágenes
-    if (_images.length > 100) {
-      print(
-        '⚡ RENDERIZADO VIRTUAL ACTIVADO: Solo se renderizan imágenes visibles (±15 páginas)',
-      );
-      print(
-        '   Esto mejora significativamente el rendimiento en capítulos grandes (${_images.length} páginas)',
-      );
-    }
-
-    print('🔍 Usando referer: ${widget.referer}');
     _webViewController?.loadData(data: htmlContent);
   }
 
@@ -535,9 +456,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       _images.length,
     );
 
-    print(
-      '🎨 Renderizado virtual OPTIMIZADO: Generando HTML para imágenes $startIndex-${endIndex - 1} (centro: $_currentPage) de ${_images.length}',
-    );
+    // Renderizado virtual optimizado
 
     final imageElements = _images
         .asMap()
@@ -588,17 +507,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
              data-distance="$distance"
              onerror="handleImageError(this, $index)"
              onload="handleImageLoad(this, $index)" />
-        <div class="loading-overlay">
-          <div class="loading-text">Cargando imagen ${index + 1}...</div>
-          <div class="loading-spinner"></div>
-        </div>
-        <div class="error-overlay" style="display: none;">
-          <div class="error-icon">⚠️</div>
-          <div class="error-text">Error cargando imagen ${index + 1}</div>
-          <button class="retry-button" onclick="retryImage($index)">
-            🔄 Reintentar
-          </button>
-        </div>
+
       </div>
     ''';
         })
@@ -683,93 +592,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           opacity: 1;
         }
         
-        .loading-overlay {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          color: #bd93f9;
-          background: rgba(0, 0, 0, 0.9);
-          padding: 20px 30px;
-          border-radius: 10px;
-          font-family: Arial, sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 10px;
-        }
-        
-        .loading-text {
-          font-size: 14px;
-        }
-        
-        .loading-spinner {
-          width: 30px;
-          height: 30px;
-          border: 3px solid rgba(189, 147, 249, 0.3);
-          border-top-color: #bd93f9;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        
-        .error-overlay {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          color: #ff5555;
-          background: rgba(0, 0, 0, 0.95);
-          padding: 20px 30px;
-          border-radius: 10px;
-          font-family: Arial, sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 15px;
-          border: 2px solid #ff5555;
-        }
-        
-        .error-icon {
-          font-size: 48px;
-        }
-        
-        .error-text {
-          font-size: 14px;
-          text-align: center;
-        }
-        
-        .retry-button {
-          background: #bd93f9;
-          color: #000;
-          border: none;
-          padding: 10px 20px;
-          border-radius: 5px;
-          font-size: 14px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        
-        .retry-button:active {
-          background: #9580d6;
-        }
-        
-        .image-loaded .loading-overlay {
-          display: none;
-        }
-        
-        .retrying .loading-overlay {
-          color: #f1fa8c;
-        }
-        
-        .retrying .loading-spinner {
-          border-top-color: #f1fa8c;
-          border-color: rgba(241, 250, 140, 0.3);
-        }
+
       </style>
     </head>
     <body>
@@ -806,8 +629,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             return; // No actualizar aún, estamos dentro del buffer
           }
           
-          console.log('🔄 Actualizando renderizado virtual: centro=' + centerPage + ', rango=[' + newStart + ',' + newEnd + ')');
-          
           // Actualizar rango
           lastRenderedRange = { start: newStart, end: newEnd };
           
@@ -815,8 +636,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           requestAnimationFrame(function() {
             // 1️⃣ Convertir a placeholders las imágenes fuera del rango
             const allContainers = document.querySelectorAll('.image-container');
-            let rendered = 0;
-            let placeholders = 0;
             
             allContainers.forEach(container => {
               const index = parseInt(container.getAttribute('data-index'));
@@ -826,17 +645,11 @@ class _MangaReaderViewState extends State<MangaReaderView> {
               if (isRendered && !shouldBeRendered) {
                 // Convertir a placeholder
                 convertToPlaceholder(container, index);
-                placeholders++;
               } else if (!isRendered && shouldBeRendered) {
                 // Renderizar imagen
                 renderImage(container, index);
-                rendered++;
               }
             });
-            
-            if (rendered > 0 || placeholders > 0) {
-              console.log('✅ Renderizado virtual: +' + rendered + ' imágenes, +' + placeholders + ' placeholders');
-            }
           });
         }
         
@@ -873,17 +686,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                  data-distance="\${distance}"
                  onerror="handleImageError(this, \${index})"
                  onload="handleImageLoad(this, \${index})" />
-            <div class="loading-overlay">
-              <div class="loading-text">Cargando imagen \${index + 1}...</div>
-              <div class="loading-spinner"></div>
-            </div>
-            <div class="error-overlay" style="display: none;">
-              <div class="error-icon">⚠️</div>
-              <div class="error-text">Error cargando imagen \${index + 1}</div>
-              <button class="retry-button" onclick="retryImage(\${index})">
-                🔄 Reintentar
-              </button>
-            </div>
+
           \`;
         }
         
@@ -905,14 +708,12 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           const allCriticalLoaded = criticalPages.every(page => criticalImagesLoaded.has(page));
           
           if (allCriticalLoaded) {
-            console.log('✅ Página actual cargada, mostrando contenido');
             showContent();
             contentShown = true;
             
             // Expandir ventana de renderizado después de mostrar contenido
             setTimeout(function() {
               if (!initialLoadComplete) {
-                console.log('🔄 Expandiendo ventana de renderizado...');
                 updateVirtualRendering(currentPage);
                 initialLoadComplete = true;
               }
@@ -920,16 +721,26 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           }
         }
         
-        // Manejo de carga de imagen (optimizado - menos logs)
+        // Manejo de carga de imagen exitosa
         function handleImageLoad(img, index) {
+          const container = img.parentElement;
+          
+          // Actualizar estado visual
           img.classList.add('loaded');
-          img.parentElement.classList.add('image-loaded');
-          img.parentElement.querySelector('.loading-overlay').style.display = 'none';
+          container.classList.add('image-loaded');
+          container.classList.remove('loading', 'retrying', 'error');
+          
+          // Mostrar imagen
+          img.style.display = 'block';
+          
+          // Resetear contador de reintentos
+          img.setAttribute('data-retry-count', '0');
           
           // Marcar como cargada y verificar si es crítica
           criticalImagesLoaded.add(index);
           checkCriticalImagesLoaded();
           
+          // Notificar a Flutter
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('ImageLoaded', JSON.stringify({
               index: index
@@ -937,64 +748,99 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           }
         }
         
-        // Manejo de error de imagen (optimizado)
+        // Manejo de error de imagen con reintento automático silencioso
         function handleImageError(img, index) {
           const container = img.parentElement;
           const retryCount = parseInt(img.getAttribute('data-retry-count') || '0');
           
           if (retryCount < MAX_RETRIES) {
-            // Retry automático
-            img.setAttribute('data-retry-count', (retryCount + 1).toString());
-            container.classList.add('retrying');
-            container.querySelector('.loading-overlay').style.display = 'flex';
-            container.querySelector('.loading-text').textContent = 
-              'Reintentando... (' + (retryCount + 1) + '/' + MAX_RETRIES + ')';
+            // Incrementar contador de reintentos
+            const newRetryCount = retryCount + 1;
+            img.setAttribute('data-retry-count', newRetryCount.toString());
             
+            // Actualizar estado interno sin mostrar al usuario
+            container.classList.add('retrying');
+            
+            // Notificar a Flutter sobre el reintento (silencioso)
             if (window.flutter_inappwebview) {
               window.flutter_inappwebview.callHandler('ImageError', JSON.stringify({
                 index: index,
-                error: 'Load failed',
-                retryCount: retryCount + 1
+                error: 'Load failed - retrying',
+                retryCount: newRetryCount,
+                isRetrying: true
               }));
             }
-          } else {
-            // Mostrar error después de todos los intentos
-            container.querySelector('.loading-overlay').style.display = 'none';
-            container.querySelector('.error-overlay').style.display = 'flex';
             
+            // Realizar reintento automático después de un delay
+            const retryDelay = 1000 * newRetryCount; // Delay incremental
+            setTimeout(function() {
+              // Obtener URL original y agregar parámetro cache-busting
+              const originalSrc = getImageUrl(index);
+              const cacheBustingSrc = originalSrc + (originalSrc.includes('?') ? '&' : '?') + 'retry=' + Date.now() + '_' + newRetryCount;
+              
+              // Forzar recarga de la imagen
+              img.src = '';
+              setTimeout(function() {
+                img.src = cacheBustingSrc;
+              }, 100);
+            }, retryDelay);
+            
+          } else {
+            // Error final - marcar como fallida silenciosamente
+            container.classList.remove('retrying');
+            container.classList.add('error');
+            
+            // Mostrar imagen placeholder o dejar vacía
+            img.style.display = 'none';
+            
+            // Notificar error final a Flutter
             if (window.flutter_inappwebview) {
               window.flutter_inappwebview.callHandler('ImageError', JSON.stringify({
                 index: index,
                 error: 'Failed after ' + MAX_RETRIES + ' retries',
-                retryCount: retryCount
+                retryCount: retryCount + 1,
+                isRetrying: false,
+                isFinalError: true
               }));
             }
           }
         }
         
-        // Retry manual de imagen
+        // Retry manual de imagen (silencioso)
         function retryImage(index) {
-          
           const container = document.querySelector('[data-index="' + index + '"]');
           if (!container) return;
           
           const img = container.querySelector('img');
-          const errorOverlay = container.querySelector('.error-overlay');
-          const loadingOverlay = container.querySelector('.loading-overlay');
+          if (!img) return;
           
-          // Resetear estado
+          // Resetear estado completamente
           img.setAttribute('data-retry-count', '0');
-          container.classList.remove('retrying', 'image-loaded');
-          errorOverlay.style.display = 'none';
-          loadingOverlay.style.display = 'flex';
-          loadingOverlay.querySelector('.loading-text').textContent = 'Cargando imagen ' + (index + 1) + '...';
-          img.classList.remove('loaded');
+          container.classList.remove('retrying', 'image-loaded', 'error');
+          container.classList.add('loading');
           
+          // Limpiar imagen
+          img.classList.remove('loaded');
+          img.style.display = 'block';
+          img.style.opacity = '0';
+          
+          // Notificar a Flutter sobre el reintento manual
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('RetryImage', JSON.stringify({
-              index: index
+              index: index,
+              isManual: true
             }));
           }
+          
+          // Realizar recarga de imagen con cache-busting
+          const originalSrc = getImageUrl(index);
+          const cacheBustingSrc = originalSrc + (originalSrc.includes('?') ? '&' : '?') + 'manual_retry=' + Date.now();
+          
+          // Forzar recarga
+          img.src = '';
+          setTimeout(function() {
+            img.src = cacheBustingSrc;
+          }, 200);
         }
         
         // Función para actualizar prioridades de carga basadas en la página actual
@@ -1071,7 +917,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             currentPage = mostVisible;
             lastPageTrackerUpdate = now;
             
-            console.log('📊 Cambio de página detectado por scroll: ' + previousPage + ' → ' + currentPage);
+
             
             // 🚀 Actualizar renderizado virtual cuando cambia la página
             updateVirtualRendering(currentPage);
@@ -1149,7 +995,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Función para mostrar el contenido después del scroll inicial
         function showContent() {
           if (contentShown) return;
-          console.log('👁️ Mostrando contenido al usuario');
           document.body.classList.add('ready');
           contentShown = true;
         }
@@ -1158,7 +1003,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         // Esto asegura que el usuario vea algo incluso si las imágenes tardan
         setTimeout(() => {
           if (!contentShown) {
-            console.log('⏱️ Timeout: mostrando contenido sin esperar imágenes');
             showContent();
             // Expandir ventana de renderizado
             setTimeout(function() {
@@ -1188,28 +1032,6 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     </body>
     </html>
     ''';
-  }
-
-  int? _cachedFailedCount;
-  int? _cachedLoadedCount;
-
-  int get _failedImagesCount {
-    return _cachedFailedCount ??=
-        _imageStates.values
-            .where((state) => state.state == ImageLoadState.error)
-            .length;
-  }
-
-  int get _loadedImagesCount {
-    return _cachedLoadedCount ??=
-        _imageStates.values
-            .where((state) => state.state == ImageLoadState.loaded)
-            .length;
-  }
-
-  void _invalidateCountCache() {
-    _cachedFailedCount = null;
-    _cachedLoadedCount = null;
   }
 
   void _navigateToPageFromSlider(int pageIndex) {
@@ -1341,6 +1163,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     ''';
 
     _webViewController?.evaluateJavascript(source: script);
+    ;
   }
 
   @override
@@ -1405,41 +1228,15 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                     ),
                   ),
                   if (_images.isNotEmpty) ...[
-                    if (_failedImagesCount > 0)
-                      IconButton(
-                        icon: Badge(
-                          label: Text(_failedImagesCount.toString()),
-                          backgroundColor: DraculaTheme.red,
-                          child: const Icon(
-                            Icons.refresh,
-                            color: DraculaTheme.red,
-                          ),
-                        ),
-                        onPressed: _retryAllFailedImages,
-                        tooltip: 'Reintentar imágenes fallidas',
-                      ),
                     Padding(
                       padding: const EdgeInsets.only(right: 12),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '${_currentPage + 1}/${_images.length}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (_loadedImagesCount < _images.length)
-                            Text(
-                              '$_loadedImagesCount cargadas',
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 10,
-                              ),
-                            ),
-                        ],
+                      child: Text(
+                        '${_currentPage + 1}/${_images.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -1708,9 +1505,18 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         controller.addJavaScriptHandler(
           handlerName: 'ImageError',
           callback: (args) {
-            final message = args[0] as String;
-            final data = jsonDecode(message);
-            _handleImageError(data['index'], data['error']);
+            try {
+              final message = args[0] as String;
+              final data = jsonDecode(message);
+              final index = data['index'] ?? -1;
+
+              if (index >= 0) {
+                // Pasar todo el objeto JSON como string para que _handleImageError lo procese
+                _handleImageError(index, message);
+              }
+            } catch (e) {
+              print('❌ Error procesando ImageError callback: $e');
+            }
           },
         );
 
@@ -1771,9 +1577,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       },
       onConsoleMessage: (controller, consoleMessage) {
-        // Console logs deshabilitados para mejor performance
-        // Descomentar solo para debugging:
-        // print('WebView Console: ${consoleMessage.message}');
+        // Console logs completamente deshabilitados para mejor performance
       },
       shouldInterceptRequest: (controller, request) async {
         final url = request.url.toString();
