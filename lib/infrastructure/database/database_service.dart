@@ -108,21 +108,27 @@ class DatabaseService {
       )
     ''');
 
-    // Índices para mejorar el rendimiento
+    // Índices para mejorar el rendimiento y optimizar consultas
     await db.execute(
-      'CREATE INDEX idx_saved_mangas_category ON saved_mangas(category)',
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_category ON saved_mangas(category)',
     );
     await db.execute(
-      'CREATE INDEX idx_saved_mangas_server ON saved_mangas(server_id)',
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_server ON saved_mangas(server_id)',
     );
     await db.execute(
-      'CREATE INDEX idx_downloaded_chapters_manga ON downloaded_chapters(manga_id, server_id)',
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_composite ON saved_mangas(manga_id, server_id)',
     );
     await db.execute(
-      'CREATE INDEX idx_reading_progress_manga ON reading_progress(manga_id, server_id)',
+      'CREATE INDEX IF NOT EXISTS idx_downloaded_chapters_manga ON downloaded_chapters(manga_id, server_id)',
     );
     await db.execute(
-      'CREATE INDEX idx_reading_progress_chapter ON reading_progress(manga_id, server_id, chapter_id)',
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_manga ON reading_progress(manga_id, server_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_chapter ON reading_progress(manga_id, server_id, chapter_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_last_read ON reading_progress(last_read_at)',
     );
   }
 
@@ -146,13 +152,50 @@ class DatabaseService {
         )
       ''');
 
+      // Crear índices para la nueva tabla
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_reading_progress_manga ON reading_progress(manga_id, server_id)',
       );
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_reading_progress_chapter ON reading_progress(manga_id, server_id, chapter_id)',
       );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_reading_progress_last_read ON reading_progress(last_read_at)',
+      );
     }
+
+    // Asegurar que todos los índices existan (para bases de datos existentes)
+    await _ensureIndexesExist(db);
+  }
+
+  /// Asegura que todos los índices necesarios existan
+  Future<void> _ensureIndexesExist(Database db) async {
+    // Índices para saved_mangas
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_category ON saved_mangas(category)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_server ON saved_mangas(server_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_saved_mangas_composite ON saved_mangas(manga_id, server_id)',
+    );
+
+    // Índices para downloaded_chapters
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_downloaded_chapters_manga ON downloaded_chapters(manga_id, server_id)',
+    );
+
+    // Índices para reading_progress
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_manga ON reading_progress(manga_id, server_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_chapter ON reading_progress(manga_id, server_id, chapter_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_progress_last_read ON reading_progress(last_read_at)',
+    );
   }
 
   // ========== CATEGORÍAS ==========
@@ -600,6 +643,217 @@ class DatabaseService {
       where: 'manga_id = ? AND server_id = ?',
       whereArgs: [mangaId.trim(), serverId.trim().toLowerCase()],
     );
+  }
+
+  // ========== LIMPIEZA Y OPTIMIZACIÓN ==========
+
+  /// Limpia el progreso de lectura de mangas que NO están guardados en la biblioteca
+  /// Esto ayuda a mantener la BD optimizada eliminando datos huérfanos
+  Future<int> cleanOrphanedReadingProgress() async {
+    final db = await database;
+
+    // Eliminar registros de progreso que no corresponden a mangas guardados
+    final result = await db.rawDelete('''
+      DELETE FROM reading_progress
+      WHERE NOT EXISTS (
+        SELECT 1 FROM saved_mangas
+        WHERE saved_mangas.manga_id = reading_progress.manga_id
+        AND saved_mangas.server_id = reading_progress.server_id
+      )
+    ''');
+
+    print('🧹 Registros de progreso huérfanos eliminados: $result');
+    return result;
+  }
+
+  /// Limpia capítulos descargados de mangas que NO están guardados en la biblioteca
+  Future<int> cleanOrphanedDownloadedChapters() async {
+    final db = await database;
+
+    final result = await db.rawDelete('''
+      DELETE FROM downloaded_chapters
+      WHERE NOT EXISTS (
+        SELECT 1 FROM saved_mangas
+        WHERE saved_mangas.manga_id = downloaded_chapters.manga_id
+        AND saved_mangas.server_id = downloaded_chapters.server_id
+      )
+    ''');
+
+    print('🧹 Capítulos descargados huérfanos eliminados: $result');
+    return result;
+  }
+
+  /// Limpia progreso de lectura antiguo (más de 90 días sin actualizar)
+  Future<int> cleanOldReadingProgress({int daysOld = 90}) async {
+    final db = await database;
+    final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
+
+    final result = await db.delete(
+      'reading_progress',
+      where: 'last_read_at < ?',
+      whereArgs: [cutoffDate.toIso8601String()],
+    );
+
+    print('🧹 Registros de progreso antiguos eliminados: $result');
+    return result;
+  }
+
+  /// Optimiza la base de datos (VACUUM, ANALYZE)
+  Future<void> optimizeDatabase() async {
+    final db = await database;
+
+    // VACUUM libera espacio no utilizado y desfragmenta la BD
+    await db.execute('VACUUM');
+
+    // ANALYZE actualiza las estadísticas de las tablas para mejorar el rendimiento
+    await db.execute('ANALYZE');
+
+    print('✅ Base de datos optimizada (VACUUM + ANALYZE)');
+  }
+
+  /// Obtiene estadísticas de la base de datos
+  Future<Map<String, dynamic>> getDatabaseStats() async {
+    final db = await database;
+
+    // Contar registros en cada tabla
+    final savedMangasCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM saved_mangas'),
+        ) ??
+        0;
+
+    final readingProgressCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM reading_progress'),
+        ) ??
+        0;
+
+    final downloadedChaptersCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM downloaded_chapters'),
+        ) ??
+        0;
+
+    final categoriesCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM categories'),
+        ) ??
+        0;
+
+    // Contar progreso huérfano (no asociado a mangas guardados)
+    final orphanedProgressCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery('''
+        SELECT COUNT(*) FROM reading_progress
+        WHERE NOT EXISTS (
+          SELECT 1 FROM saved_mangas
+          WHERE saved_mangas.manga_id = reading_progress.manga_id
+          AND saved_mangas.server_id = reading_progress.server_id
+        )
+      '''),
+        ) ??
+        0;
+
+    return {
+      'savedMangas': savedMangasCount,
+      'readingProgress': readingProgressCount,
+      'downloadedChapters': downloadedChaptersCount,
+      'categories': categoriesCount,
+      'orphanedProgress': orphanedProgressCount,
+    };
+  }
+
+  /// Realiza una limpieza completa del caché
+  Future<Map<String, int>> performFullCacheCleanup() async {
+    print('🧹 Iniciando limpieza completa del caché...');
+
+    final orphanedProgress = await cleanOrphanedReadingProgress();
+    final orphanedChapters = await cleanOrphanedDownloadedChapters();
+    final oldProgress = await cleanOldReadingProgress(daysOld: 90);
+
+    // Optimizar la base de datos después de la limpieza
+    await optimizeDatabase();
+
+    print('✅ Limpieza completa finalizada');
+
+    return {
+      'orphanedProgress': orphanedProgress,
+      'orphanedChapters': orphanedChapters,
+      'oldProgress': oldProgress,
+      'total': orphanedProgress + orphanedChapters + oldProgress,
+    };
+  }
+
+  /// Obtiene el tamaño de la base de datos en bytes
+  Future<int> getDatabaseSize() async {
+    try {
+      final databasesPath = await getDatabasesPath();
+      final path = join(databasesPath, 'mangari.db');
+      final file = await databaseFactory.databaseExists(path);
+
+      if (file) {
+        // Obtener tamaño usando consulta SQL
+        final db = await database;
+        final result = await db.rawQuery('PRAGMA page_count');
+        final pageCount = Sqflite.firstIntValue(result) ?? 0;
+
+        final pageSizeResult = await db.rawQuery('PRAGMA page_size');
+        final pageSize = Sqflite.firstIntValue(pageSizeResult) ?? 4096;
+
+        return pageCount * pageSize;
+      }
+      return 0;
+    } catch (e) {
+      print('❌ Error obteniendo tamaño de BD: $e');
+      return 0;
+    }
+  }
+
+  /// Obtiene estadísticas avanzadas de rendimiento
+  Future<Map<String, dynamic>> getPerformanceStats() async {
+    final db = await database;
+    final stats = await getDatabaseStats();
+    final size = await getDatabaseSize();
+
+    // Obtener información de fragmentación
+    final freelistResult = await db.rawQuery('PRAGMA freelist_count');
+    final freelistCount = Sqflite.firstIntValue(freelistResult) ?? 0;
+
+    final pageCountResult = await db.rawQuery('PRAGMA page_count');
+    final pageCount = Sqflite.firstIntValue(pageCountResult) ?? 0;
+
+    final fragmentationPercentage =
+        pageCount > 0
+            ? (freelistCount / pageCount * 100).toStringAsFixed(2)
+            : '0.00';
+
+    return {
+      ...stats,
+      'databaseSize': size,
+      'databaseSizeMB': (size / (1024 * 1024)).toStringAsFixed(2),
+      'fragmentationPercentage': fragmentationPercentage,
+      'shouldOptimize': freelistCount > 100 || stats['orphanedProgress']! > 50,
+    };
+  }
+
+  /// Realiza mantenimiento automático si es necesario
+  Future<bool> autoMaintenance() async {
+    try {
+      final perfStats = await getPerformanceStats();
+      final shouldOptimize = perfStats['shouldOptimize'] as bool;
+
+      if (shouldOptimize) {
+        print('🔧 Iniciando mantenimiento automático...');
+        await performFullCacheCleanup();
+        return true;
+      }
+
+      print('✅ Base de datos en buen estado, no requiere mantenimiento');
+      return false;
+    } catch (e) {
+      print('❌ Error en mantenimiento automático: $e');
+      return false;
+    }
   }
 
   /// Cierra la base de datos
