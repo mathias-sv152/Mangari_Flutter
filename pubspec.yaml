@@ -62,6 +62,14 @@ dependencies:
   
   # HTML parser for TMO service
   html: ^0.15.6
+  
+  # Local database for saved mangas
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  path: ^1.9.0
+  
+  # Downloads
+  dio: ^5.4.0
 
 dev_dependencies:
   flutter_test:

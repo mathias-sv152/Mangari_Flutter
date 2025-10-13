@@ -4,18 +4,15 @@ import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/chapter_view_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/application/services/servers_service_v2.dart';
+import 'package:mangari/infrastructure/database/database_service.dart';
 import 'package:mangari/core/di/service_locator.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:async';
 
-enum ImageLoadState {
-  loading,
-  loaded,
-  error,
-  retrying,
-}
+enum ImageLoadState { loading, loaded, error, retrying }
 
 class ImageState {
   final String url;
@@ -35,6 +32,7 @@ class MangaReaderView extends StatefulWidget {
   final ChapterViewEntity chapter;
   final ServerEntity server;
   final String mangaTitle;
+  final String mangaId;
   final String referer;
   final VoidCallback onBack;
 
@@ -43,6 +41,7 @@ class MangaReaderView extends StatefulWidget {
     required this.chapter,
     required this.server,
     required this.mangaTitle,
+    required this.mangaId,
     required this.referer,
     required this.onBack,
   });
@@ -54,33 +53,37 @@ class MangaReaderView extends StatefulWidget {
 class _MangaReaderViewState extends State<MangaReaderView> {
   static const int maxRetries = 3;
   static const int retryDelayMs = 1000;
-  
+
   ServersServiceV2? _serversService;
-  
+  DatabaseService? _databaseService;
+
   List<String> _images = [];
   Map<int, ImageState> _imageStates = {};
   bool _isLoading = true;
   String? _errorMessage;
   int _currentPage = 0;
   bool _showControls = true;
-  
+
   InAppWebViewController? _webViewController;
-  
+
   // Cliente HTTP reutilizable con timeout
   late final http.Client _httpClient;
-  
+
   // Cache de imágenes en memoria para evitar múltiples descargas
   final Map<String, Uint8List> _imageCache = {};
-  
+
   // Debouncing para updateCurrentPage
   DateTime _lastPageUpdate = DateTime.now();
+
+  // Timer para guardar progreso periódicamente
+  Timer? _progressSaveTimer;
 
   @override
   void initState() {
     super.initState();
     // Inicializar cliente HTTP
     _httpClient = http.Client();
-    
+
     // Configurar la UI del sistema para mostrar las barras inicialmente
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -91,14 +94,20 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       _initializeService();
     });
   }
-  
+
   @override
   void dispose() {
+    // Guardar progreso final antes de salir
+    _saveReadingProgress();
+
+    // Cancelar timer
+    _progressSaveTimer?.cancel();
+
     // Limpiar recursos
     _httpClient.close();
     _imageCache.clear();
     _webViewController?.dispose();
-    
+
     // Restaurar la UI del sistema al salir
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -111,12 +120,15 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     try {
       print('🔍 MangaReaderView: Intentando obtener ServersServiceV2...');
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       _serversService = getServersServiceSafely();
-      
+      _databaseService = DatabaseService();
+
       if (_serversService != null) {
         print('✅ MangaReaderView: ServersServiceV2 obtenido correctamente');
         await _loadChapterImages();
+        await _loadReadingProgress();
+        _startProgressSaveTimer();
       } else {
         print('❌ MangaReaderView: No se pudo obtener ServersServiceV2');
         if (mounted) {
@@ -137,19 +149,117 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     }
   }
 
+  // ========== GESTIÓN DE PROGRESO DE LECTURA ==========
 
+  /// Carga el progreso de lectura guardado
+  Future<void> _loadReadingProgress() async {
+    if (_databaseService == null || _images.isEmpty) return;
+
+    try {
+      final progress = await _databaseService!.getReadingProgress(
+        mangaId: widget.mangaId,
+        serverId: widget.server.id,
+        chapterId: widget.chapter.editorialLink,
+        editorial: widget.chapter.editorialName,
+      );
+
+      if (progress != null && mounted) {
+        final savedPage = progress['current_page'] as int;
+        print(
+          '📖 Progreso cargado: página $savedPage de ${progress['total_pages']}',
+        );
+
+        if (savedPage > 0 && savedPage < _images.length) {
+          setState(() {
+            _currentPage = savedPage;
+          });
+
+          // Navegar a la página guardada después de un pequeño delay
+          await Future.delayed(const Duration(milliseconds: 500));
+          _navigateToPage(savedPage);
+        }
+      }
+    } catch (e) {
+      print('❌ Error cargando progreso de lectura: $e');
+    }
+  }
+
+  /// Guarda el progreso de lectura actual
+  Future<void> _saveReadingProgress() async {
+    if (_databaseService == null || _images.isEmpty) return;
+
+    try {
+      await _databaseService!.saveReadingProgress(
+        mangaId: widget.mangaId,
+        serverId: widget.server.id,
+        chapterId: widget.chapter.editorialLink,
+        chapterTitle: widget.chapter.chapterTitle,
+        editorial: widget.chapter.editorialName,
+        currentPage: _currentPage,
+        totalPages: _images.length,
+      );
+
+      print('💾 Progreso guardado: página $_currentPage de ${_images.length}');
+    } catch (e) {
+      print('❌ Error guardando progreso: $e');
+    }
+  }
+
+  /// Inicia un timer para guardar el progreso periódicamente
+  void _startProgressSaveTimer() {
+    _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _saveReadingProgress();
+    });
+  }
+
+  /// Actualiza el progreso cuando cambia la página actual
+  void _updateCurrentPageProgress(int newPage) {
+    if (_currentPage == newPage) return;
+
+    setState(() {
+      _currentPage = newPage;
+    });
+
+    // Guardar progreso inmediatamente al cambiar de página
+    _saveReadingProgress();
+
+    // Si llegó a la última página, marcar como completado
+    if (newPage >= _images.length - 1) {
+      _markChapterAsCompleted();
+    }
+  }
+
+  /// Marca el capítulo como completado
+  Future<void> _markChapterAsCompleted() async {
+    if (_databaseService == null) return;
+
+    try {
+      await _databaseService!.markChapterAsCompleted(
+        mangaId: widget.mangaId,
+        serverId: widget.server.id,
+        chapterId: widget.chapter.editorialLink,
+        chapterTitle: widget.chapter.chapterTitle,
+        editorial: widget.chapter.editorialName,
+        totalPages: _images.length,
+      );
+
+      print('✅ Capítulo marcado como completado');
+    } catch (e) {
+      print('❌ Error marcando capítulo como completado: $e');
+    }
+  }
 
   void _handleImageLoaded(int index) {
     if (!mounted || !_imageStates.containsKey(index)) return;
-    
+
     // Actualizar estado sin setState si no es visible
     final imageState = _imageStates[index]!;
     if (imageState.state == ImageLoadState.loaded) return; // Ya cargada
-    
+
     imageState.state = ImageLoadState.loaded;
     imageState.retryCount = 0;
     imageState.errorMessage = null;
-    
+
     // Solo setState si es relevante para la UI (cerca de la página actual)
     if ((index - _currentPage).abs() <= 3) {
       setState(() {});
@@ -158,33 +268,37 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   void _handleImageError(int index, String error) {
     if (!mounted || !_imageStates.containsKey(index)) return;
-    
+
     final imageState = _imageStates[index]!;
-    
+
     if (imageState.retryCount < maxRetries) {
       // Retry automático
       imageState.state = ImageLoadState.retrying;
       imageState.retryCount++;
-      imageState.errorMessage = 'Reintentando... (${imageState.retryCount}/$maxRetries)';
+      imageState.errorMessage =
+          'Reintentando... (${imageState.retryCount}/$maxRetries)';
       _invalidateCountCache();
-      
+
       // Solo setState si es visible
       if ((index - _currentPage).abs() <= 3) {
         setState(() {});
       }
-      
+
       // Esperar antes de reintentar
-      Future.delayed(Duration(milliseconds: retryDelayMs * imageState.retryCount), () {
-        if (mounted) {
-          _retryImageLoad(index);
-        }
-      });
+      Future.delayed(
+        Duration(milliseconds: retryDelayMs * imageState.retryCount),
+        () {
+          if (mounted) {
+            _retryImageLoad(index);
+          }
+        },
+      );
     } else {
       // Falló después de todos los intentos
       imageState.state = ImageLoadState.error;
       imageState.errorMessage = 'Error después de $maxRetries intentos';
       _invalidateCountCache();
-      
+
       if ((index - _currentPage).abs() <= 3) {
         setState(() {});
       }
@@ -193,9 +307,9 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   void _retryImageLoad(int index) {
     if (!mounted || !_imageStates.containsKey(index)) return;
-    
+
     print('🔄 Reintentando carga de imagen $index...');
-    
+
     final script = '''
       (function() {
         const container = document.querySelector('[data-index="$index"]');
@@ -218,30 +332,31 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       })();
     ''';
-    
+
     _webViewController?.evaluateJavascript(source: script);
   }
 
   void _retryImageManually(int index) {
     if (!mounted || !_imageStates.containsKey(index)) return;
-    
+
     print('🔄 Retry manual de imagen $index');
-    
+
     setState(() {
       _imageStates[index]!.state = ImageLoadState.loading;
       _imageStates[index]!.retryCount = 0;
       _imageStates[index]!.errorMessage = null;
     });
-    
+
     _retryImageLoad(index);
   }
 
   void _retryAllFailedImages() {
-    final failedImages = _imageStates.entries
-        .where((entry) => entry.value.state == ImageLoadState.error)
-        .map((entry) => entry.key)
-        .toList();
-    
+    final failedImages =
+        _imageStates.entries
+            .where((entry) => entry.value.state == ImageLoadState.error)
+            .map((entry) => entry.key)
+            .toList();
+
     if (failedImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -251,13 +366,13 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       );
       return;
     }
-    
+
     print('🔄 Reintentando ${failedImages.length} imágenes fallidas...');
-    
+
     for (final index in failedImages) {
       _retryImageManually(index);
     }
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Reintentando ${failedImages.length} imagen(es)...'),
@@ -268,7 +383,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   Future<void> _loadChapterImages() async {
     if (_serversService == null) return;
-    
+
     try {
       setState(() {
         _isLoading = true;
@@ -276,14 +391,19 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         _imageStates.clear();
       });
 
-      print('🔍 MangaReaderView: Usando servidor ${widget.server.id} con referer ${widget.referer}');
+      print(
+        '🔍 MangaReaderView: Usando servidor ${widget.server.id} con referer ${widget.referer}',
+      );
 
-      final images = await _serversService!.getChapterImagesFromServer(widget.server.id, widget.chapter.editorialLink);
-      
+      final images = await _serversService!.getChapterImagesFromServer(
+        widget.server.id,
+        widget.chapter.editorialLink,
+      );
+
       setState(() {
         _images = images;
         _isLoading = false;
-        
+
         // Inicializar estados de imágenes
         for (int i = 0; i < images.length; i++) {
           _imageStates[i] = ImageState(url: images[i]);
@@ -325,7 +445,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         };
       })();
     ''';
-    
+
     await _webViewController?.evaluateJavascript(source: script);
   }
 
@@ -333,7 +453,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     setState(() {
       _showControls = !_showControls;
     });
-    
+
     // Controlar la visibilidad de la barra de estado del sistema
     if (_showControls) {
       // Mostrar barra de notificaciones
@@ -343,9 +463,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       );
     } else {
       // Ocultar barra de notificaciones (modo inmersivo)
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.immersive,
-      );
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
     }
   }
 
@@ -357,10 +475,13 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   }
 
   String _generateHtmlContent() {
-    final imageElements = _images.asMap().entries.map((entry) {
-      final index = entry.key;
-      final imageUrl = entry.value;
-      return '''
+    final imageElements = _images
+        .asMap()
+        .entries
+        .map((entry) {
+          final index = entry.key;
+          final imageUrl = entry.value;
+          return '''
       <div class="image-container" data-index="$index">
         <img src="$imageUrl" 
              alt="Manga page $index" 
@@ -384,7 +505,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         </div>
       </div>
     ''';
-    }).join('\n');
+        })
+        .join('\n');
 
     return '''
     <!DOCTYPE html>
@@ -691,19 +813,21 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   int? _cachedFailedCount;
   int? _cachedLoadedCount;
-  
+
   int get _failedImagesCount {
-    return _cachedFailedCount ??= _imageStates.values
-        .where((state) => state.state == ImageLoadState.error)
-        .length;
+    return _cachedFailedCount ??=
+        _imageStates.values
+            .where((state) => state.state == ImageLoadState.error)
+            .length;
   }
 
   int get _loadedImagesCount {
-    return _cachedLoadedCount ??= _imageStates.values
-        .where((state) => state.state == ImageLoadState.loaded)
-        .length;
+    return _cachedLoadedCount ??=
+        _imageStates.values
+            .where((state) => state.state == ImageLoadState.loaded)
+            .length;
   }
-  
+
   void _invalidateCountCache() {
     _cachedFailedCount = null;
     _cachedLoadedCount = null;
@@ -711,7 +835,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   void _navigateToPage(int pageIndex) {
     if (pageIndex < 0 || pageIndex >= _images.length) return;
-    
+
     final script = '''
       (function() {
         const container = document.querySelector('[data-index="$pageIndex"]');
@@ -720,7 +844,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         }
       })();
     ''';
-    
+
     _webViewController?.evaluateJavascript(source: script);
   }
 
@@ -748,9 +872,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
         child: Container(
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.75),
-          ),
+          decoration: BoxDecoration(color: Colors.black.withOpacity(0.75)),
           child: SafeArea(
             bottom: false,
             child: Container(
@@ -793,7 +915,10 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                         icon: Badge(
                           label: Text(_failedImagesCount.toString()),
                           backgroundColor: DraculaTheme.red,
-                          child: const Icon(Icons.refresh, color: DraculaTheme.red),
+                          child: const Icon(
+                            Icons.refresh,
+                            color: DraculaTheme.red,
+                          ),
                         ),
                         onPressed: _retryAllFailedImages,
                         tooltip: 'Reintentar imágenes fallidas',
@@ -834,7 +959,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
 
   Widget _buildAnimatedBottomBar() {
     if (_images.isEmpty) return const SizedBox.shrink();
-    
+
     return Positioned(
       left: 0,
       right: 0,
@@ -852,7 +977,10 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -870,9 +998,12 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                           child: SliderTheme(
                             data: SliderThemeData(
                               activeTrackColor: DraculaTheme.purple,
-                              inactiveTrackColor: DraculaTheme.purple.withOpacity(0.3),
+                              inactiveTrackColor: DraculaTheme.purple
+                                  .withOpacity(0.3),
                               thumbColor: DraculaTheme.purple,
-                              overlayColor: DraculaTheme.purple.withOpacity(0.3),
+                              overlayColor: DraculaTheme.purple.withOpacity(
+                                0.3,
+                              ),
                               trackHeight: 4,
                               thumbShape: const RoundSliderThumbShape(
                                 enabledThumbRadius: 8,
@@ -886,9 +1017,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                               onChanged: (value) {
                                 final newPage = value.round();
                                 if (newPage != _currentPage) {
-                                  setState(() {
-                                    _currentPage = newPage;
-                                  });
+                                  _updateCurrentPageProgress(newPage);
                                   _navigateToPage(newPage);
                                 }
                               },
@@ -925,10 +1054,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             SizedBox(height: 16),
             Text(
               'Cargando imágenes...',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-              ),
+              style: TextStyle(color: Colors.white, fontSize: 16),
             ),
           ],
         ),
@@ -982,10 +1108,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       return const Center(
         child: Text(
           'No hay imágenes disponibles',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-          ),
+          style: TextStyle(color: Colors.white, fontSize: 16),
         ),
       );
     }
@@ -1020,7 +1143,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       ),
       onWebViewCreated: (controller) {
         _webViewController = controller;
-        
+
         // Agregar JavaScript handlers
         controller.addJavaScriptHandler(
           handlerName: 'PageTracker',
@@ -1028,27 +1151,25 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             final now = DateTime.now();
             // Debouncing: solo actualizar si han pasado 100ms
             if (now.difference(_lastPageUpdate).inMilliseconds < 100) return;
-            
+
             final message = args[0] as String;
             final pageData = jsonDecode(message);
             final newPage = pageData['currentPage'] ?? 0;
-            
+
             if (_currentPage != newPage) {
               _lastPageUpdate = now;
-              setState(() {
-                _currentPage = newPage;
-              });
+              _updateCurrentPageProgress(newPage);
             }
           },
         );
-        
+
         controller.addJavaScriptHandler(
           handlerName: 'ToggleControls',
           callback: (args) {
             _toggleControls();
           },
         );
-        
+
         controller.addJavaScriptHandler(
           handlerName: 'ImageLoaded',
           callback: (args) {
@@ -1057,7 +1178,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             _handleImageLoaded(data['index']);
           },
         );
-        
+
         controller.addJavaScriptHandler(
           handlerName: 'ImageError',
           callback: (args) {
@@ -1066,7 +1187,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             _handleImageError(data['index'], data['error']);
           },
         );
-        
+
         controller.addJavaScriptHandler(
           handlerName: 'RetryImage',
           callback: (args) {
@@ -1075,7 +1196,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             _retryImageManually(data['index']);
           },
         );
-        
+
         controller.addJavaScriptHandler(
           handlerName: 'Console',
           callback: (args) {
@@ -1083,7 +1204,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
             print('WebView Console: $message');
           },
         );
-        
+
         // Cargar el contenido HTML después de configurar los handlers
         if (_images.isNotEmpty) {
           _loadHtmlContent();
@@ -1098,12 +1219,14 @@ class _MangaReaderViewState extends State<MangaReaderView> {
       },
       shouldInterceptRequest: (controller, request) async {
         final url = request.url.toString();
-        
+
         // Solo interceptar imágenes de manga
-        if (!_images.any((imageUrl) => url.contains(imageUrl) || imageUrl.contains(url))) {
+        if (!_images.any(
+          (imageUrl) => url.contains(imageUrl) || imageUrl.contains(url),
+        )) {
           return null;
         }
-        
+
         try {
           // Verificar cache primero
           if (_imageCache.containsKey(url)) {
@@ -1113,31 +1236,33 @@ class _MangaReaderViewState extends State<MangaReaderView> {
               statusCode: 200,
             );
           }
-          
+
           // Realizar petición con timeout y el cliente reutilizable
           final response = await _httpClient
               .get(
                 Uri.parse(url),
                 headers: {
                   'Referer': widget.referer,
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                  'User-Agent':
+                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Accept':
+                      'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
                 },
               )
               .timeout(const Duration(seconds: 15));
-          
+
           if (response.statusCode == 200) {
             // Cachear solo si el tamaño es razonable (< 5MB)
             if (response.bodyBytes.length < 5 * 1024 * 1024) {
               _imageCache[url] = Uint8List.fromList(response.bodyBytes);
-              
+
               // Limitar cache a 50 imágenes para evitar OOM
               if (_imageCache.length > 50) {
                 final firstKey = _imageCache.keys.first;
                 _imageCache.remove(firstKey);
               }
             }
-            
+
             return WebResourceResponse(
               contentType: response.headers['content-type'] ?? 'image/jpeg',
               data: response.bodyBytes,
@@ -1147,7 +1272,7 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         } catch (e) {
           // Silenciar errores de timeout/network - dejar que el retry maneje
         }
-        
+
         return null;
       },
     );
