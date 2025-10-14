@@ -3,16 +3,19 @@ import 'package:http/http.dart' as http;
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/domain/interfaces/i_mangadex_reporitory.dart';
 import 'package:mangari/domain/interfaces/i_tmo_repository.dart';
+import 'package:mangari/domain/interfaces/i_tmo_hentai_repository.dart';
 import 'package:mangari/domain/interfaces/i_hitomi_repository.dart';
 
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/application/services/tmo_service.dart';
+import 'package:mangari/application/services/tmo_hentai_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
 import 'package:mangari/application/services/hitomi_service.dart';
 
 import 'package:mangari/infrastructure/repositories/mangadex_repository.dart';
 import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
 import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
+import 'package:mangari/infrastructure/repositories/tmo_hentai_repository.dart';
 import 'package:mangari/infrastructure/repositories/hitomi_repository.dart';
 import 'package:mangari/infrastructure/client/api_client.dart';
 
@@ -57,6 +60,9 @@ void setupDependencies() {
     getIt.registerLazySingleton<ITmoRepository>(
       () => TmoRepository(getIt<http.Client>()),
     );
+    getIt.registerLazySingleton<ITmoHentaiRepository>(
+      () => TmoHentaiRepository(getIt<http.Client>()),
+    );
     getIt.registerLazySingleton<IMangaDexRepository>(
       () => MangaDexRepository(getIt<http.Client>()),
     );
@@ -68,6 +74,11 @@ void setupDependencies() {
     // ========== SERVICES (Application) ==========
     getIt.registerLazySingleton<TmoService>(
       () => TmoService(tmoRepository: getIt<ITmoRepository>()),
+    );
+
+    getIt.registerLazySingleton<TmoHentaiService>(
+      () =>
+          TmoHentaiService(tmoHentaiRepository: getIt<ITmoHentaiRepository>()),
     );
 
     getIt.registerLazySingleton<MangaDexService>(
@@ -84,6 +95,7 @@ void setupDependencies() {
       () => ServersRepositoryV2(
         mangaDexService: getIt<MangaDexService>(),
         tmoService: getIt<TmoService>(),
+        tmoHentaiService: getIt<TmoHentaiService>(),
         hitomiService: getIt<HitomiService>(),
       ),
     );

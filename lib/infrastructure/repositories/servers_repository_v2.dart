@@ -4,14 +4,16 @@ import 'package:mangari/domain/entities/filter_entity.dart';
 import 'package:mangari/domain/interfaces/i_servers_repository_v2.dart';
 import 'package:mangari/application/interfaces/i_manga_service.dart';
 import 'package:mangari/application/services/tmo_service.dart';
+import 'package:mangari/application/services/tmo_hentai_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
 import 'package:mangari/application/services/hitomi_service.dart';
 
 /// Repositorio de Servidores que implementa IServersRepositoryV2
-/// Maneja MangaDex, TMO y Hitomi como servidores activos
+/// Maneja MangaDex, TMO, TMO Hentai y Hitomi como servidores activos
 class ServersRepositoryV2 implements IServersRepositoryV2 {
   final MangaDexService _mangaDexService;
   final TmoService _tmoService;
+  final TmoHentaiService _tmoHentaiService;
   final HitomiService _hitomiService;
   late final List<ServerEntity> _servers;
   late final Map<String, IMangaService> _serviceMap;
@@ -19,18 +21,21 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   ServersRepositoryV2({
     required MangaDexService mangaDexService,
     required TmoService tmoService,
+    required TmoHentaiService tmoHentaiService,
     required HitomiService hitomiService,
   }) : _mangaDexService = mangaDexService,
        _tmoService = tmoService,
+       _tmoHentaiService = tmoHentaiService,
        _hitomiService = hitomiService {
     // Inicializar el mapa de servicios
     _serviceMap = {
       'mangadex': _mangaDexService,
       'tmo': _tmoService,
+      'tmo_hentai': _tmoHentaiService,
       'hitomi': _hitomiService,
     };
 
-    // Inicializar los servidores con MangaDex y TMO
+    // Inicializar los servidores con MangaDex, TMO y TMO Hentai
     _servers = [
       ServerEntity(
         id: 'mangadex',
@@ -49,6 +54,17 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         baseUrl: 'https://zonatmo.com',
         isActive: _tmoService.isActive,
         serviceName: _tmoService.serverName,
+      ),
+      ServerEntity(
+        id: 'tmo_hentai',
+        name: 'TMO Hentai',
+        iconUrl:
+            'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT41h_Eezrjf_r4rQJrnBPU7bk8vQHy9CidjQ&s',
+        language: 'Es',
+        baseUrl: 'https://tmohentai.com',
+        isActive: _tmoHentaiService.isActive,
+        serviceName: _tmoHentaiService.serverName,
+        isAdult: true,
       ),
       ServerEntity(
         id: 'hitomi',
@@ -80,16 +96,6 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         language: 'Es',
         baseUrl: 'https://uchuujinmangas.com',
         isActive: false,
-      ),
-      ServerEntity(
-        // servidor a implementar
-        id: 'tmohentai',
-        name: 'TMO Hentai',
-        iconUrl: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT41h_Eezrjf_r4rQJrnBPU7bk8vQHy9CidjQ&s',
-        language: 'Es',
-        baseUrl: 'https://tmohentai.com',
-        isActive: false,
-        isAdult: true,
       ),
     ];
   }
