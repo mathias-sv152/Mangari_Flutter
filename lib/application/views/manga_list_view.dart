@@ -13,10 +13,7 @@ import 'package:mangari/application/views/manga_detail_view.dart';
 class MangaListView extends StatefulWidget {
   final ServerEntity server;
 
-  const MangaListView({
-    super.key,
-    required this.server,
-  });
+  const MangaListView({super.key, required this.server});
 
   @override
   State<MangaListView> createState() => _MangaListViewState();
@@ -26,11 +23,11 @@ class _MangaListViewState extends State<MangaListView> {
   ServersServiceV2? _serversService;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<MangaEntity> _mangas = [];
   List<FilterGroupEntity> _availableFilters = [];
   Map<String, dynamic> _selectedFilters = {};
-  
+
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _hasMorePages = true;
@@ -62,10 +59,10 @@ class _MangaListViewState extends State<MangaListView> {
     try {
       print('🔍 MangaListView: Esperando un momento antes de inicializar...');
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       print('🔍 MangaListView: Intentando obtener ServersServiceV2...');
       _serversService = getServersServiceSafely();
-      
+
       if (_serversService != null) {
         print('✅ MangaListView: ServersServiceV2 obtenido correctamente');
         await _loadFilters();
@@ -90,9 +87,11 @@ class _MangaListViewState extends State<MangaListView> {
 
   Future<void> _loadFilters() async {
     if (_serversService == null) return;
-    
+
     try {
-      final filters = await _serversService!.getFiltersForServer(widget.server.id);
+      final filters = await _serversService!.getFiltersForServer(
+        widget.server.id,
+      );
       setState(() {
         _availableFilters = filters;
         _hasFilters = filters.isNotEmpty;
@@ -113,7 +112,7 @@ class _MangaListViewState extends State<MangaListView> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >= 
+    if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
       if (!_isLoadingMore && _hasMorePages) {
         _loadMoreMangas();
@@ -123,7 +122,7 @@ class _MangaListViewState extends State<MangaListView> {
 
   Future<void> _loadMangas() async {
     if (!mounted || _serversService == null) return;
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -132,7 +131,7 @@ class _MangaListViewState extends State<MangaListView> {
 
     try {
       List<MangaEntity> mangas;
-      
+
       // Si hay filtros seleccionados, aplicar filtros
       if (_selectedFilters.isNotEmpty) {
         // Agregar el texto de búsqueda a los filtros si existe
@@ -140,29 +139,30 @@ class _MangaListViewState extends State<MangaListView> {
           _selectedFilters['searchText'] = _searchQuery;
         }
         mangas = await _serversService!.applyFiltersInServer(
-          widget.server.id, 
-          _currentPage, 
+          widget.server.id,
+          _currentPage,
           _selectedFilters,
         );
       } else if (_searchQuery.isNotEmpty) {
         // Solo búsqueda sin filtros
         mangas = await _serversService!.searchMangaInServer(
-          widget.server.id, 
-          _searchQuery, 
+          widget.server.id,
+          _searchQuery,
           page: _currentPage,
         );
       } else {
         // Carga normal sin búsqueda ni filtros
         mangas = await _serversService!.getMangasFromServer(
-          widget.server.id, 
+          widget.server.id,
           page: _currentPage,
         );
       }
-      
+
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        _hasMorePages = mangas.length >= 20;
+        // Para servidores como Territorio Leal, ser más flexible con la paginación
+        _hasMorePages = _shouldHaveMorePages(mangas.length, widget.server.id);
       });
     } catch (e) {
       setState(() {
@@ -174,7 +174,7 @@ class _MangaListViewState extends State<MangaListView> {
 
   Future<void> _searchMangas() async {
     if (!mounted || _serversService == null) return;
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -183,27 +183,28 @@ class _MangaListViewState extends State<MangaListView> {
 
     try {
       List<MangaEntity> mangas;
-      
+
       // Si hay filtros, combinar búsqueda con filtros
       if (_selectedFilters.isNotEmpty) {
         _selectedFilters['searchText'] = _searchQuery;
         mangas = await _serversService!.applyFiltersInServer(
-          widget.server.id, 
-          _currentPage, 
+          widget.server.id,
+          _currentPage,
           _selectedFilters,
         );
       } else {
         mangas = await _serversService!.searchMangaInServer(
-          widget.server.id, 
-          _searchQuery, 
+          widget.server.id,
+          _searchQuery,
           page: _currentPage,
         );
       }
-      
+
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        _hasMorePages = mangas.length >= 20;
+        // Para servidores como Territorio Leal, ser más flexible con la paginación
+        _hasMorePages = _shouldHaveMorePages(mangas.length, widget.server.id);
       });
     } catch (e) {
       setState(() {
@@ -222,35 +223,41 @@ class _MangaListViewState extends State<MangaListView> {
 
     try {
       List<MangaEntity> newMangas;
-      
+
       // Cargar más según el estado actual
       if (_selectedFilters.isNotEmpty || _searchQuery.isNotEmpty) {
         if (_searchQuery.isNotEmpty) {
           _selectedFilters['searchText'] = _searchQuery;
         }
         newMangas = await _serversService!.applyFiltersInServer(
-          widget.server.id, 
-          _currentPage + 1, 
+          widget.server.id,
+          _currentPage + 1,
           _selectedFilters,
         );
       } else {
         newMangas = await _serversService!.getMangasFromServer(
-          widget.server.id, 
+          widget.server.id,
           page: _currentPage + 1,
         );
       }
-      
+
       setState(() {
-        _mangas.addAll(newMangas);
-        _currentPage++;
+        if (newMangas.isNotEmpty) {
+          _mangas.addAll(newMangas);
+          _currentPage++;
+        }
         _isLoadingMore = false;
-        _hasMorePages = newMangas.length >= 20;
+        // Para servidores como Territorio Leal, ser más flexible con la paginación
+        _hasMorePages = _shouldHaveMorePages(
+          newMangas.length,
+          widget.server.id,
+        );
       });
     } catch (e) {
       setState(() {
         _isLoadingMore = false;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -267,21 +274,23 @@ class _MangaListViewState extends State<MangaListView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => FilterBottomSheet(
-          filterGroups: _availableFilters,
-          initialFilters: _selectedFilters,
-          onApply: (filters) {
-            setState(() {
-              _selectedFilters = filters;
-            });
-            _loadMangas();
-          },
-        ),
-      ),
+      builder:
+          (context) => DraggableScrollableSheet(
+            initialChildSize: 0.7,
+            minChildSize: 0.5,
+            maxChildSize: 0.95,
+            builder:
+                (context, scrollController) => FilterBottomSheet(
+                  filterGroups: _availableFilters,
+                  initialFilters: _selectedFilters,
+                  onApply: (filters) {
+                    setState(() {
+                      _selectedFilters = filters;
+                    });
+                    _loadMangas();
+                  },
+                ),
+          ),
     );
   }
 
@@ -315,50 +324,49 @@ class _MangaListViewState extends State<MangaListView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _buildAppBar(),
-      body: _buildMangaList(),
-    );
+    return Scaffold(appBar: _buildAppBar(), body: _buildMangaList());
   }
 
   PreferredSizeWidget _buildAppBar() {
-    final hasActiveFilters = _selectedFilters.isNotEmpty || _searchQuery.isNotEmpty;
+    final hasActiveFilters =
+        _selectedFilters.isNotEmpty || _searchQuery.isNotEmpty;
     final appBarHeight = hasActiveFilters ? 104.0 : 56.0;
-    
+
     return PreferredSize(
       preferredSize: Size.fromHeight(appBarHeight),
       child: AppBar(
         scrolledUnderElevation: 0,
-        title: _isSearching 
-          ? TextField(
-              controller: _searchController,
-              autofocus: true,
-              style: const TextStyle(color: DraculaTheme.foreground),
-              decoration: const InputDecoration(
-                hintText: 'Buscar manga (presiona Enter)...',
-                hintStyle: TextStyle(color: DraculaTheme.comment),
-                border: InputBorder.none,
-              ),
-              textInputAction: TextInputAction.search,
-              onSubmitted: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
-                _performSearch();
-              },
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(widget.server.name),
-                Text(
-                  'Catálogo de Manga',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DraculaTheme.comment,
+        title:
+            _isSearching
+                ? TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  style: const TextStyle(color: DraculaTheme.foreground),
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar manga (presiona Enter)...',
+                    hintStyle: TextStyle(color: DraculaTheme.comment),
+                    border: InputBorder.none,
                   ),
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                    _performSearch();
+                  },
+                )
+                : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.server.name),
+                    Text(
+                      'Catálogo de Manga',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: DraculaTheme.comment,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
@@ -446,7 +454,7 @@ class _MangaListViewState extends State<MangaListView> {
 
   List<Widget> _buildChipsList() {
     List<Widget> chips = [];
-    
+
     // Chip de búsqueda
     if (_searchQuery.isNotEmpty) {
       chips.add(
@@ -462,7 +470,7 @@ class _MangaListViewState extends State<MangaListView> {
         ),
       );
     }
-    
+
     // Chips de filtros (excluyendo searchText del conteo)
     final activeFiltersCount = _getActiveFiltersCount();
     if (activeFiltersCount > 0) {
@@ -484,7 +492,7 @@ class _MangaListViewState extends State<MangaListView> {
         ),
       );
     }
-    
+
     return chips;
   }
 
@@ -493,6 +501,22 @@ class _MangaListViewState extends State<MangaListView> {
     return _selectedFilters.entries
         .where((entry) => entry.key != 'searchText')
         .length;
+  }
+
+  /// Determina si debería haber más páginas basándose en el servidor y cantidad de resultados
+  bool _shouldHaveMorePages(int resultsCount, String serverId) {
+    // Para Territorio Leal, ser más flexible ya que puede devolver menos elementos
+    if (serverId == 'territorio_leal') {
+      // Si devuelve 0 elementos, definitivamente no hay más páginas
+      if (resultsCount == 0) return false;
+
+      // Si devuelve al menos 1 elemento, asumimos que puede haber más
+      // Solo dejaremos de cargar cuando recibamos 0 resultados en la siguiente página
+      return true;
+    }
+
+    // Para otros servidores, usar la lógica original
+    return resultsCount >= 20;
   }
 
   Widget _buildMangaList() {
@@ -560,10 +584,7 @@ class _MangaListViewState extends State<MangaListView> {
             SizedBox(height: 16),
             Text(
               'No hay mangas disponibles',
-              style: TextStyle(
-                fontSize: 18,
-                color: DraculaTheme.comment,
-              ),
+              style: TextStyle(fontSize: 18, color: DraculaTheme.comment),
             ),
           ],
         ),
@@ -579,10 +600,9 @@ class _MangaListViewState extends State<MangaListView> {
         // Navegar a la vista de detalles del manga
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (context) => MangaDetailView(
-              manga: manga,
-              server: widget.server,
-            ),
+            builder:
+                (context) =>
+                    MangaDetailView(manga: manga, server: widget.server),
           ),
         );
       },
