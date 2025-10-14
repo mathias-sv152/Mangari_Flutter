@@ -106,11 +106,6 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
 
       // Determinar el servidor basado en el service del manga
       String serverId = widget.manga.service.toLowerCase();
-      if (serverId == 'mangadex') {
-        serverId = 'mangadex';
-      } else if (serverId == 'tmo') {
-        serverId = 'tmo';
-      }
 
       final detailedManga = await _serversService!.getMangaDetailFromServer(
         serverId,
