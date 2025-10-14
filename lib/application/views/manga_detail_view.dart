@@ -721,6 +721,8 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
                                     ),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ),
