@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/manga_detail_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
@@ -544,131 +546,229 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
 
   Widget _buildHeroSection(MangaDetailEntity manga) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      color: DraculaTheme.currentLine,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      height: 280,
+      child: Stack(
         children: [
-          // Imagen de portada
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _showImageZoom = true;
-              });
-            },
-            child: Container(
-              width: 120,
-              height: 180,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: DraculaTheme.selection,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
+          // Imagen de fondo difuminada
+          Positioned.fill(
+            child: ClipRect(
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                child: SmartCachedImage(
+                  imageUrl: manga.linkImage.trim(),
+                  httpHeaders: {
+                    'Referer': manga.referer ?? '',
+                    'User-Agent': 'Mozilla/5.0 (compatible; MangaReader/1.0)',
+                  },
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  memCacheWidth: 800,
+                  memCacheHeight: 600,
+                  cacheKey: 'manga_detail_bg_${manga.id}',
+                  filterQuality: FilterQuality.high,
+                  placeholder: Container(
+                    color: DraculaTheme.currentLine,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: DraculaTheme.purple,
+                        strokeWidth: 2,
+                      ),
+                    ),
                   ),
-                ],
+                  errorWidget: Container(
+                    color: DraculaTheme.currentLine,
+                    child: const Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        color: DraculaTheme.comment,
+                        size: 64,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Stack(
-                  children: [
-                    SmartCachedImage(
-                      imageUrl: manga.linkImage.trim(),
-                      httpHeaders: {
-                        'Referer': manga.referer ?? '',
-                        'User-Agent':
-                            'Mozilla/5.0 (compatible; MangaReader/1.0)',
-                      },
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                      memCacheWidth: 240,
-                      memCacheHeight: 360,
-                      cacheKey: 'manga_detail_cover_${manga.id}',
-                      filterQuality: FilterQuality.high,
-                      placeholder: Container(
-                        color: DraculaTheme.selection,
-                        child: const Center(
-                          child: CircularProgressIndicator(
-                            color: DraculaTheme.purple,
-                            strokeWidth: 2,
-                          ),
-                        ),
-                      ),
-                      errorWidget: Container(
-                        color: DraculaTheme.selection,
-                        child: const Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: DraculaTheme.comment,
-                            size: 48,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Overlay sutil para indicar que es clickeable
-                    Positioned(
-                      bottom: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.zoom_in,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
+            ),
+          ),
+
+          // Overlay con gradiente Dracula
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    DraculaTheme.background.withOpacity(0.2),
+                    DraculaTheme.background.withOpacity(0.8),
                   ],
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 16),
 
-          // Detalles del manga
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  manga.title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: DraculaTheme.foreground,
+          // Card con estilo Dracula mejorado
+          Positioned.fill(
+            child: Container(
+              margin: const EdgeInsets.all(16),
+              child: Card(
+                elevation: 0,
+                color: Colors.transparent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: DraculaTheme.purple.withOpacity(0.2),
+                    width: 1,
                   ),
                 ),
-                const SizedBox(height: 8),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    color: DraculaTheme.currentLine.withOpacity(0.7),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Imagen de portada
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _showImageZoom = true;
+                            });
+                          },
+                          child: Container(
+                            width: 120,
+                            height: 180,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: DraculaTheme.selection,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                children: [
+                                  SmartCachedImage(
+                                    imageUrl: manga.linkImage.trim(),
+                                    httpHeaders: {
+                                      'Referer': manga.referer ?? '',
+                                      'User-Agent':
+                                          'Mozilla/5.0 (compatible; MangaReader/1.0)',
+                                    },
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    memCacheWidth: 240,
+                                    memCacheHeight: 360,
+                                    cacheKey: 'manga_detail_cover_${manga.id}',
+                                    filterQuality: FilterQuality.high,
+                                    placeholder: Container(
+                                      color: DraculaTheme.selection,
+                                      child: const Center(
+                                        child: CircularProgressIndicator(
+                                          color: DraculaTheme.purple,
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                    ),
+                                    errorWidget: Container(
+                                      color: DraculaTheme.selection,
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.broken_image,
+                                          color: DraculaTheme.comment,
+                                          size: 48,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  // Overlay para indicar que es clickeable
+                                  Positioned(
+                                    bottom: 8,
+                                    right: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.8),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Icon(
+                                        Icons.zoom_in,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
 
-                if (manga.author.isNotEmpty &&
-                    manga.author != 'Autor desconocido')
-                  _buildInfoRow(Icons.person, manga.author),
+                        // Detalles del manga
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onLongPress: _copyTitle,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                    horizontal: 8,
+                                  ),
+                                  child: Text(
+                                    manga.title,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
 
-                if (manga.status.isNotEmpty &&
-                    manga.status != 'Estado desconocido')
-                  _buildInfoRow(Icons.info_outline, manga.status),
+                              if (manga.author.isNotEmpty &&
+                                  manga.author != 'Autor desconocido')
+                                _buildInfoRowHero(Icons.person, manga.author),
 
-                const SizedBox(height: 12),
+                              if (manga.status.isNotEmpty &&
+                                  manga.status != 'Estado desconocido')
+                                _buildInfoRowHero(
+                                  Icons.info_outline,
+                                  manga.status,
+                                ),
 
-                // Badges
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _buildBadge(manga.bookType, DraculaTheme.purple),
-                    if (manga.demography.isNotEmpty &&
-                        manga.demography != 'N/A')
-                      _buildBadge(manga.demography, DraculaTheme.cyan),
-                  ],
+                              const SizedBox(height: 12),
+
+                              // Badges
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _buildBadgeHero(
+                                    manga.bookType,
+                                    DraculaTheme.purple,
+                                  ),
+                                  if (manga.demography.isNotEmpty &&
+                                      manga.demography != 'N/A')
+                                    _buildBadgeHero(
+                                      manga.demography,
+                                      DraculaTheme.cyan,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -678,24 +778,30 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
 
   Widget _buildActionButtons() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(8),
       child: Row(
         children: [
           // Botón de Guardar/Cambiar categoría
           Expanded(
-            flex: 2,
+            flex: _isSaved ? 2 : 3,
             child: GestureDetector(
-              onLongPress: _isSaved ? _showSaveCategoryDialog : null,
+              onLongPress: _showSaveCategoryDialog,
               child: ElevatedButton.icon(
                 onPressed:
                     _isSaved ? _showSaveCategoryDialog : () => _saveManga(),
                 icon: Icon(_isSaved ? Icons.bookmark : Icons.bookmark_border),
-                label: Text(_isSaved ? 'Cambiar categoría' : 'Guardar'),
+                label: Text(
+                  _isSaved ? 'Cambiar categoría' : 'Guardar',
+                  overflow: TextOverflow.ellipsis,
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor:
                       _isSaved ? DraculaTheme.green : DraculaTheme.purple,
                   foregroundColor: DraculaTheme.background,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 8,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -703,7 +809,8 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+
+          if (_isSaved) const SizedBox(width: 8),
 
           // Botón de Eliminar (solo si está guardado)
           if (_isSaved)
@@ -714,25 +821,30 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
               tooltip: 'Eliminar de biblioteca',
               style: IconButton.styleFrom(
                 backgroundColor: DraculaTheme.red.withOpacity(0.1),
+                padding: const EdgeInsets.all(12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
             ),
 
-          const SizedBox(width: 8),
+          if (_isSaved) const SizedBox(width: 8),
 
           // Botón de Descargar (solo si está guardado)
           if (_isSaved)
             Expanded(
+              flex: 2,
               child: ElevatedButton.icon(
                 onPressed: _showDownloadOptions,
                 icon: const Icon(Icons.download),
-                label: const Text('Descargar'),
+                label: const Text('Descargar', overflow: TextOverflow.ellipsis),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: DraculaTheme.cyan,
                   foregroundColor: DraculaTheme.background,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 8,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -887,6 +999,66 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
     }
   }
 
+  /// Copia el título del manga al portapapeles
+  Future<void> _copyTitle() async {
+    final manga = _mangaDetail ?? widget.manga;
+
+    try {
+      await Clipboard.setData(ClipboardData(text: manga.title));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Título copiado al portapapeles'),
+            backgroundColor: DraculaTheme.green,
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error copiando título: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al copiar título: $e'),
+            backgroundColor: DraculaTheme.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Copia un género específico al portapapeles
+  Future<void> _copyGenre(String genreText) async {
+    try {
+      await Clipboard.setData(ClipboardData(text: genreText));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Género "$genreText" copiado'),
+            backgroundColor: DraculaTheme.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error copiando género: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al copiar género: $e'),
+            backgroundColor: DraculaTheme.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildInfoRow(IconData icon, String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -901,6 +1073,24 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
                 color: DraculaTheme.foreground,
                 fontSize: 14,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRowHero(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.white70),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
             ),
           ),
         ],
@@ -926,6 +1116,24 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
     );
   }
 
+  Widget _buildBadgeHero(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   Widget _buildGenresSection(List<GenreEntity> genres) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -937,13 +1145,33 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Géneros',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-              color: DraculaTheme.foreground,
-            ),
+          Row(
+            children: [
+              const Text(
+                'Géneros',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: DraculaTheme.foreground,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: DraculaTheme.comment.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'Mantén presionado para copiar',
+                  style: TextStyle(
+                    color: DraculaTheme.comment,
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -952,20 +1180,38 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
             children:
                 genres
                     .map(
-                      (genre) => Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: DraculaTheme.currentLine,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          genre.text,
-                          style: const TextStyle(
-                            color: DraculaTheme.foreground,
-                            fontSize: 12,
+                      (genre) => GestureDetector(
+                        onLongPress: () => _copyGenre(genre.text),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: DraculaTheme.currentLine,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: DraculaTheme.purple.withOpacity(0.3),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                genre.text,
+                                style: const TextStyle(
+                                  color: DraculaTheme.foreground,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.copy,
+                                size: 10,
+                                color: DraculaTheme.comment,
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1162,12 +1408,15 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
                         color: DraculaTheme.purple,
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        editorial.editorialName,
-                        style: const TextStyle(
-                          color: DraculaTheme.purple,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
+                      Flexible(
+                        child: Text(
+                          editorial.editorialName,
+                          style: const TextStyle(
+                            color: DraculaTheme.purple,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
