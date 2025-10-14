@@ -321,12 +321,8 @@ class TmoHentaiService implements IMangaService {
         );
       }
 
-      // Extraer ID del manga
-      final idMatch = RegExp(r'/contents/([a-zA-Z0-9]+)').firstMatch(mangaUrl);
-      final id = idMatch?.group(1) ?? mangaUrl;
-
       return MangaEntity(
-        id: id,
+        id: mangaUrl, // Usar la URL completa como ID
         title: title,
         coverImageUrl: '', // Se puede extraer si es necesario
         authors: autor != null ? [autor] : [],
