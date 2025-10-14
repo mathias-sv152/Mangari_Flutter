@@ -113,7 +113,10 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
       );
       // Convertir de vuelta a MangaDetailEntity
       final detailedMangaEntity = MangaDetailEntity(
-        title: detailedManga.title,
+        title:
+            detailedManga.title.isEmpty
+                ? widget.manga.title
+                : detailedManga.title,
         linkImage:
             (detailedManga.coverImageUrl?.isEmpty ?? true)
                 ? widget.manga.linkImage

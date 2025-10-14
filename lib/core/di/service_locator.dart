@@ -5,18 +5,21 @@ import 'package:mangari/domain/interfaces/i_mangadex_reporitory.dart';
 import 'package:mangari/domain/interfaces/i_tmo_repository.dart';
 import 'package:mangari/domain/interfaces/i_tmo_hentai_repository.dart';
 import 'package:mangari/domain/interfaces/i_hitomi_repository.dart';
+import 'package:mangari/domain/interfaces/i_territorio_leal_repository.dart';
 
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/application/services/tmo_service.dart';
 import 'package:mangari/application/services/tmo_hentai_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
 import 'package:mangari/application/services/hitomi_service.dart';
+import 'package:mangari/application/services/territorio_leal_service.dart';
 
 import 'package:mangari/infrastructure/repositories/mangadex_repository.dart';
 import 'package:mangari/infrastructure/repositories/servers_repository_v2.dart';
 import 'package:mangari/infrastructure/repositories/tmo_repository.dart';
 import 'package:mangari/infrastructure/repositories/tmo_hentai_repository.dart';
 import 'package:mangari/infrastructure/repositories/hitomi_repository.dart';
+import 'package:mangari/infrastructure/repositories/territorio_leal_repository.dart';
 import 'package:mangari/infrastructure/client/api_client.dart';
 
 // Importar servicios de biblioteca y descargas
@@ -69,6 +72,9 @@ void setupDependencies() {
     getIt.registerLazySingleton<IHitomiRepository>(
       () => HitomiRepository(getIt<http.Client>()),
     );
+    getIt.registerLazySingleton<ITerritorioLealRepository>(
+      () => TerritorioLealRepository(getIt<http.Client>()),
+    );
 
     print('🔧 Registrando services...');
     // ========== SERVICES (Application) ==========
@@ -89,6 +95,12 @@ void setupDependencies() {
       () => HitomiService(hitomiRepository: getIt<IHitomiRepository>()),
     );
 
+    getIt.registerLazySingleton<TerritorioLealService>(
+      () => TerritorioLealService(
+        territorioLealRepository: getIt<ITerritorioLealRepository>(),
+      ),
+    );
+
     print('🔧 Registrando repositories v2...');
     // ========== REPOSITORIES V2 ==========
     getIt.registerLazySingleton<IServersRepositoryV2>(
@@ -97,6 +109,7 @@ void setupDependencies() {
         tmoService: getIt<TmoService>(),
         tmoHentaiService: getIt<TmoHentaiService>(),
         hitomiService: getIt<HitomiService>(),
+        territorioLealService: getIt<TerritorioLealService>(),
       ),
     );
 
@@ -166,6 +179,11 @@ void _verifyDependencies() {
     final hitomiRepo = getIt<IHitomiRepository>();
     print('✓ IHitomiRepository registrado: ${hitomiRepo.runtimeType}');
 
+    final territorioLealRepo = getIt<ITerritorioLealRepository>();
+    print(
+      '✓ ITerritorioLealRepository registrado: ${territorioLealRepo.runtimeType}',
+    );
+
     // Verificar services
     final tmoService = getIt<TmoService>();
     print('✓ TmoService registrado: ${tmoService.runtimeType}');
@@ -175,6 +193,11 @@ void _verifyDependencies() {
 
     final hitomiService = getIt<HitomiService>();
     print('✓ HitomiService registrado: ${hitomiService.runtimeType}');
+
+    final territorioLealService = getIt<TerritorioLealService>();
+    print(
+      '✓ TerritorioLealService registrado: ${territorioLealService.runtimeType}',
+    );
 
     // Verificar repository v2
     final serversRepo = getIt<IServersRepositoryV2>();

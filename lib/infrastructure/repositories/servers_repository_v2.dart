@@ -7,6 +7,7 @@ import 'package:mangari/application/services/tmo_service.dart';
 import 'package:mangari/application/services/tmo_hentai_service.dart';
 import 'package:mangari/application/services/mangadex_service.dart';
 import 'package:mangari/application/services/hitomi_service.dart';
+import 'package:mangari/application/services/territorio_leal_service.dart';
 
 /// Repositorio de Servidores que implementa IServersRepositoryV2
 /// Maneja MangaDex, TMO, TMO Hentai y Hitomi como servidores activos
@@ -15,6 +16,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   final TmoService _tmoService;
   final TmoHentaiService _tmoHentaiService;
   final HitomiService _hitomiService;
+  final TerritorioLealService _territorioLealService;
   late final List<ServerEntity> _servers;
   late final Map<String, IMangaService> _serviceMap;
 
@@ -23,16 +25,19 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
     required TmoService tmoService,
     required TmoHentaiService tmoHentaiService,
     required HitomiService hitomiService,
+    required TerritorioLealService territorioLealService,
   }) : _mangaDexService = mangaDexService,
        _tmoService = tmoService,
        _tmoHentaiService = tmoHentaiService,
-       _hitomiService = hitomiService {
+       _hitomiService = hitomiService,
+       _territorioLealService = territorioLealService {
     // Inicializar el mapa de servicios
     _serviceMap = {
       'mangadex': _mangaDexService,
       'tmo': _tmoService,
       'tmo_hentai': _tmoHentaiService,
       'hitomi': _hitomiService,
+      'territorio_leal': _territorioLealService,
     };
 
     // Inicializar los servidores con MangaDex, TMO y TMO Hentai
@@ -78,14 +83,14 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
         isAdult: true,
       ),
       ServerEntity(
-        // servidor a implementar
-        id: 'territorioleal',
+        id: 'territorio_leal',
         name: 'Territorio Leal',
         iconUrl:
             'https://territorioleal.com/wp-content/uploads/2017/10/pngwing.com-1.png',
         language: 'Es',
         baseUrl: 'https://territorioprotegido.xyz',
-        isActive: false,
+        isActive: _territorioLealService.isActive,
+        serviceName: _territorioLealService.serverName,
       ),
       ServerEntity(
         // servidor a implementar
