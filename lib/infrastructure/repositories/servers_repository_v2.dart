@@ -1,3 +1,4 @@
+import 'package:mangari/application/services/uchuujin_service.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/domain/entities/manga_entity.dart';
 import 'package:mangari/domain/entities/filter_entity.dart';
@@ -17,6 +18,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
   final TmoHentaiService _tmoHentaiService;
   final HitomiService _hitomiService;
   final TerritorioLealService _territorioLealService;
+  final UchuujinService _uchuujinService;
   late final List<ServerEntity> _servers;
   late final Map<String, IMangaService> _serviceMap;
 
@@ -26,11 +28,13 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
     required TmoHentaiService tmoHentaiService,
     required HitomiService hitomiService,
     required TerritorioLealService territorioLealService,
+    required UchuujinService uchuujinService,
   }) : _mangaDexService = mangaDexService,
        _tmoService = tmoService,
        _tmoHentaiService = tmoHentaiService,
        _hitomiService = hitomiService,
-       _territorioLealService = territorioLealService {
+       _territorioLealService = territorioLealService,
+       _uchuujinService = uchuujinService {
     // Inicializar el mapa de servicios
     _serviceMap = {
       'mangadex': _mangaDexService,
@@ -38,6 +42,7 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
       'tmo_hentai': _tmoHentaiService,
       'hitomi': _hitomiService,
       'territorio_leal': _territorioLealService,
+      'uchuujin': _uchuujinService,
     };
 
     // Inicializar los servidores con MangaDex, TMO y TMO Hentai
@@ -94,13 +99,14 @@ class ServersRepositoryV2 implements IServersRepositoryV2 {
       ),
       ServerEntity(
         // servidor a implementar
-        id: 'uchuujinmangas',
+        id: 'uchuujin',
         name: 'Uchuujin Mangas',
         iconUrl:
             'https://uchuujinmangas.com/wp-content/uploads/2024/12/logo2.png',
         language: 'Es',
         baseUrl: 'https://uchuujinmangas.com',
-        isActive: false,
+        isActive: _uchuujinService.isActive,
+        serviceName: _uchuujinService.serverName,
       ),
     ];
   }
