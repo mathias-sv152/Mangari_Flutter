@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mangari/core/theme/dracula_theme.dart';
 import 'package:mangari/domain/entities/chapter_view_entity.dart';
+import 'package:mangari/domain/entities/chapter_entity.dart';
+import 'package:mangari/domain/entities/editorial_entity.dart';
 import 'package:mangari/domain/entities/server_entity_v2.dart';
 import 'package:mangari/application/services/servers_service_v2.dart';
 import 'package:mangari/infrastructure/database/database_service.dart';
@@ -34,6 +36,9 @@ class MangaReaderView extends StatefulWidget {
   final String mangaId;
   final String referer;
   final VoidCallback onBack;
+  final List<ChapterEntity>? allChapters; // Lista completa de capítulos
+  final int? currentChapterIndex; // Índice del capítulo actual
+  final Function(ChapterEntity, EditorialEntity)? onChapterChange; // Callback para cambiar capítulo
 
   const MangaReaderView({
     super.key,
@@ -43,6 +48,9 @@ class MangaReaderView extends StatefulWidget {
     required this.mangaId,
     required this.referer,
     required this.onBack,
+    this.allChapters,
+    this.currentChapterIndex,
+    this.onChapterChange,
   });
 
   @override
@@ -73,11 +81,22 @@ class _MangaReaderViewState extends State<MangaReaderView> {
   // Timer para debounce de navegación del slider
   Timer? _sliderNavigationTimer;
 
+  // Variables para navegación entre capítulos
+  bool _canNavigateToPrevious = false;
+  bool _canNavigateToNext = false;
+  ChapterEntity? _previousChapter;
+  ChapterEntity? _nextChapter;
+  EditorialEntity? _previousEditorial;
+  EditorialEntity? _nextEditorial;
+
   @override
   void initState() {
     super.initState();
     // Inicializar cliente HTTP
     _httpClient = http.Client();
+    
+    // Verificar navegación disponible
+    _checkChapterNavigation();
 
     // Configurar la UI del sistema para mostrar las barras inicialmente
     SystemChrome.setEnabledSystemUIMode(
@@ -88,6 +107,32 @@ class _MangaReaderViewState extends State<MangaReaderView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeService();
     });
+  }
+
+  @override
+  void didUpdateWidget(MangaReaderView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // Si cambió el capítulo, recargar todo
+    if (oldWidget.chapter.editorialLink != widget.chapter.editorialLink ||
+        oldWidget.chapter.editorialName != widget.chapter.editorialName) {
+      print('📖 Cambio de capítulo detectado: ${widget.chapter.chapterTitle}');
+      
+      // Resetear el estado
+      setState(() {
+        _images = [];
+        _imageStates = {};
+        _isLoading = true;
+        _errorMessage = null;
+        _currentPage = 0;
+      });
+      
+      // Verificar navegación disponible
+      _checkChapterNavigation();
+      
+      // Recargar el nuevo capítulo
+      _loadChapterImages();
+    }
   }
 
   @override
@@ -138,6 +183,134 @@ class _MangaReaderViewState extends State<MangaReaderView> {
         });
       }
     }
+  }
+
+  // ========== NAVEGACIÓN ENTRE CAPÍTULOS ==========
+
+  /// Verifica si hay capítulos anteriores/siguientes disponibles
+  void _checkChapterNavigation() {
+    if (widget.allChapters == null || 
+        widget.currentChapterIndex == null || 
+        widget.onChapterChange == null) {
+      setState(() {
+        _canNavigateToPrevious = false;
+        _canNavigateToNext = false;
+      });
+      return;
+    }
+
+    final chapters = widget.allChapters!;
+
+    // Encontrar el índice del capítulo actual (no expandido, solo capítulos únicos)
+    int currentChapterIndex = -1;
+    for (int i = 0; i < chapters.length; i++) {
+      final chapter = chapters[i];
+      // Comparar por el título del capítulo para identificar el capítulo actual
+      if (chapter.numAndTitleCap == widget.chapter.chapterTitle) {
+        currentChapterIndex = i;
+        break;
+      }
+    }
+
+    if (currentChapterIndex == -1) {
+      setState(() {
+        _canNavigateToPrevious = false;
+        _canNavigateToNext = false;
+      });
+      return;
+    }
+
+    // Verificar capítulo anterior (índice + 1, porque la lista va del más nuevo al más viejo)
+    // "Anterior" = más viejo = índice mayor
+    if (currentChapterIndex < chapters.length - 1) {
+      final prevChapter = chapters[currentChapterIndex + 1];
+      // Usar la primera editorial disponible del capítulo anterior
+      final prevEditorial = prevChapter.editorials.isNotEmpty 
+          ? prevChapter.editorials.first 
+          : null;
+      
+      if (prevEditorial != null) {
+        setState(() {
+          _canNavigateToPrevious = true;
+          _previousChapter = prevChapter;
+          _previousEditorial = prevEditorial;
+        });
+      } else {
+        setState(() {
+          _canNavigateToPrevious = false;
+          _previousChapter = null;
+          _previousEditorial = null;
+        });
+      }
+    } else {
+      setState(() {
+        _canNavigateToPrevious = false;
+        _previousChapter = null;
+        _previousEditorial = null;
+      });
+    }
+
+    // Verificar capítulo siguiente (índice - 1, porque la lista va del más nuevo al más viejo)
+    // "Siguiente" = más nuevo = índice menor
+    if (currentChapterIndex > 0) {
+      final nextChapter = chapters[currentChapterIndex - 1];
+      // Usar la primera editorial disponible del capítulo siguiente
+      final nextEditorial = nextChapter.editorials.isNotEmpty 
+          ? nextChapter.editorials.first 
+          : null;
+      
+      if (nextEditorial != null) {
+        setState(() {
+          _canNavigateToNext = true;
+          _nextChapter = nextChapter;
+          _nextEditorial = nextEditorial;
+        });
+      } else {
+        setState(() {
+          _canNavigateToNext = false;
+          _nextChapter = null;
+          _nextEditorial = null;
+        });
+      }
+    } else {
+      setState(() {
+        _canNavigateToNext = false;
+        _nextChapter = null;
+        _nextEditorial = null;
+      });
+    }
+  }
+
+  /// Navega al capítulo anterior
+  void _goToPreviousChapter() {
+    if (!_canNavigateToPrevious || 
+        _previousChapter == null || 
+        _previousEditorial == null ||
+        widget.onChapterChange == null) {
+      return;
+    }
+
+    // Guardar progreso del capítulo actual antes de cambiar
+    _saveReadingProgress();
+
+    // Notificar el cambio de capítulo
+    widget.onChapterChange!(_previousChapter!, _previousEditorial!);
+  }
+
+  /// Navega al capítulo siguiente
+  void _goToNextChapter() {
+    if (!_canNavigateToNext || 
+        _nextChapter == null || 
+        _nextEditorial == null ||
+        widget.onChapterChange == null) {
+      return;
+    }
+
+    // Guardar progreso del capítulo actual antes de cambiar
+    _saveReadingProgress();
+
+    // Notificar el cambio de capítulo
+    widget.onChapterChange!(_nextChapter!, _nextEditorial!);
   }
 
   // ========== GESTIÓN DE PROGRESO DE LECTURA ==========
@@ -222,14 +395,30 @@ class _MangaReaderViewState extends State<MangaReaderView> {
           if (_currentPage == newPage) {
             _saveReadingProgress();
 
-            // Si llegó a la última página, marcar como completado
-            if (newPage >= _images.length - 1) {
-              _markChapterAsCompleted();
-            }
+            // Marcar como completado cuando está cerca del final
+            _checkAndMarkAsCompleted(newPage);
           }
         });
       }
     });
+  }
+
+  /// Verifica si debe marcar el capítulo como completado
+  /// Se marca como completado cuando el usuario está a 2 páginas o menos del final
+  void _checkAndMarkAsCompleted(int currentPage) {
+    if (_images.isEmpty) return;
+
+    // Calcular páginas restantes
+    final pagesRemaining = _images.length - 1 - currentPage;
+    
+    // Marcar como completado si quedan 2 páginas o menos
+    // Para capítulos muy cortos (menos de 5 páginas), marcar solo en la última página
+    final threshold = _images.length < 5 ? 0 : 2;
+    
+    if (pagesRemaining <= threshold) {
+      print('📗 Marcando capítulo como completado (página ${currentPage + 1}/${_images.length})');
+      _markChapterAsCompleted();
+    }
   }
 
   /// Marca el capítulo como completado
@@ -1240,6 +1429,23 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                       ),
                     ),
                   ],
+                  // Botones de navegación entre capítulos
+                  if (widget.allChapters != null) ...[
+                    IconButton(
+                      icon: const Icon(Icons.skip_previous, color: Colors.white),
+                      onPressed: _canNavigateToPrevious ? _goToPreviousChapter : null,
+                      tooltip: _canNavigateToPrevious 
+                          ? 'Capítulo anterior: ${_previousChapter?.numAndTitleCap ?? ""}'
+                          : 'No hay capítulo anterior',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_next, color: Colors.white),
+                      onPressed: _canNavigateToNext ? _goToNextChapter : null,
+                      tooltip: _canNavigateToNext
+                          ? 'Capítulo siguiente: ${_nextChapter?.numAndTitleCap ?? ""}'
+                          : 'No hay capítulo siguiente',
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1326,6 +1532,60 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                         ),
                       ],
                     ),
+                    // Botones de navegación entre capítulos en la parte inferior
+                    if (widget.allChapters != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _canNavigateToPrevious ? _goToPreviousChapter : null,
+                              icon: const Icon(Icons.skip_previous, size: 20),
+                              label: Text(
+                                _canNavigateToPrevious 
+                                    ? 'Anterior'
+                                    : 'Sin anterior',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _canNavigateToPrevious 
+                                    ? DraculaTheme.purple 
+                                    : DraculaTheme.currentLine,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _canNavigateToNext ? _goToNextChapter : null,
+                              icon: const Icon(Icons.skip_next, size: 20),
+                              label: Text(
+                                _canNavigateToNext
+                                    ? 'Siguiente'
+                                    : 'Sin siguiente',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _canNavigateToNext
+                                    ? DraculaTheme.purple 
+                                    : DraculaTheme.currentLine,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1471,10 +1731,8 @@ class _MangaReaderViewState extends State<MangaReaderView> {
                   if (_currentPage == newPage) {
                     _saveReadingProgress();
 
-                    // Si llegó a la última página, marcar como completado
-                    if (newPage >= _images.length - 1) {
-                      _markChapterAsCompleted();
-                    }
+                    // Marcar como completado cuando está cerca del final
+                    _checkAndMarkAsCompleted(newPage);
                   }
                 });
               } else if (!isFromScroll) {

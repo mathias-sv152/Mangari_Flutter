@@ -35,6 +35,8 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
   String? _errorMessage;
   bool _isDescriptionExpanded = false;
   ChapterViewEntity? _selectedChapter;
+  ChapterEntity? _selectedChapterEntity; // Entidad completa del capítulo
+  EditorialEntity? _selectedEditorial; // Editorial seleccionada
   bool _showImageZoom = false;
   bool _isSaved = false;
 
@@ -404,7 +406,29 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
 
     setState(() {
       _selectedChapter = chapterView;
+      _selectedChapterEntity = chapter;
+      _selectedEditorial = editorial;
     });
+  }
+
+  /// Encuentra el índice del capítulo actual en la lista de capítulos
+  int? _findCurrentChapterIndex() {
+    if (_selectedChapterEntity == null || _selectedEditorial == null) {
+      return null;
+    }
+
+    final manga = _mangaDetail ?? widget.manga;
+    if (manga.chapters.isEmpty) return null;
+
+    // Buscar el índice del capítulo
+    for (int i = 0; i < manga.chapters.length; i++) {
+      final chapter = manga.chapters[i];
+      if (chapter.numAndTitleCap == _selectedChapterEntity!.numAndTitleCap) {
+        return i;
+      }
+    }
+
+    return null;
   }
 
   @override
@@ -418,9 +442,27 @@ class _MangaDetailViewState extends State<MangaDetailView> with RouteAware {
         mangaTitle: manga.title,
         mangaId: manga.id,
         referer: manga.referer ?? '',
+        allChapters: manga.chapters,
+        currentChapterIndex: _findCurrentChapterIndex(),
+        onChapterChange: (newChapter, newEditorial) {
+          // Cambiar al nuevo capítulo
+          final newChapterView = ChapterViewEntity(
+            editorialName: newEditorial.editorialName,
+            editorialLink: newEditorial.editorialLink,
+            chapterTitle: newChapter.numAndTitleCap,
+          );
+          
+          setState(() {
+            _selectedChapter = newChapterView;
+            _selectedChapterEntity = newChapter;
+            _selectedEditorial = newEditorial;
+          });
+        },
         onBack: () {
           setState(() {
             _selectedChapter = null;
+            _selectedChapterEntity = null;
+            _selectedEditorial = null;
           });
           // Recargar el progreso de los capítulos
           _loadChaptersProgress();
