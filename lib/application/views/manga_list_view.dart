@@ -161,8 +161,8 @@ class _MangaListViewState extends State<MangaListView> {
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        // Para servidores como Territorio Leal, ser más flexible con la paginación
-        _hasMorePages = _shouldHaveMorePages(mangas.length, widget.server.id);
+        // Si devuelve al menos 1 manga, asumimos que puede haber más páginas
+        _hasMorePages = mangas.isNotEmpty;
       });
     } catch (e) {
       setState(() {
@@ -203,8 +203,8 @@ class _MangaListViewState extends State<MangaListView> {
       setState(() {
         _mangas = mangas;
         _isLoading = false;
-        // Para servidores como Territorio Leal, ser más flexible con la paginación
-        _hasMorePages = _shouldHaveMorePages(mangas.length, widget.server.id);
+        // Si devuelve al menos 1 manga, asumimos que puede haber más páginas
+        _hasMorePages = mangas.isNotEmpty;
       });
     } catch (e) {
       setState(() {
@@ -245,27 +245,20 @@ class _MangaListViewState extends State<MangaListView> {
         if (newMangas.isNotEmpty) {
           _mangas.addAll(newMangas);
           _currentPage++;
+          // Si la siguiente página devuelve resultados, asumimos que puede haber más
+          _hasMorePages = true;
+        } else {
+          // Si no devuelve resultados, no hay más páginas
+          _hasMorePages = false;
         }
         _isLoadingMore = false;
-        // Para servidores como Territorio Leal, ser más flexible con la paginación
-        _hasMorePages = _shouldHaveMorePages(
-          newMangas.length,
-          widget.server.id,
-        );
       });
     } catch (e) {
+      // Si falla la carga de más mangas, silenciosamente detenemos la paginación
       setState(() {
         _isLoadingMore = false;
+        _hasMorePages = false;
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error cargando más mangas: $e'),
-            backgroundColor: DraculaTheme.red,
-          ),
-        );
-      }
     }
   }
 
@@ -501,22 +494,6 @@ class _MangaListViewState extends State<MangaListView> {
     return _selectedFilters.entries
         .where((entry) => entry.key != 'searchText')
         .length;
-  }
-
-  /// Determina si debería haber más páginas basándose en el servidor y cantidad de resultados
-  bool _shouldHaveMorePages(int resultsCount, String serverId) {
-    // Para Territorio Leal, ser más flexible ya que puede devolver menos elementos
-    if (serverId == 'territorio_leal') {
-      // Si devuelve 0 elementos, definitivamente no hay más páginas
-      if (resultsCount == 0) return false;
-
-      // Si devuelve al menos 1 elemento, asumimos que puede haber más
-      // Solo dejaremos de cargar cuando recibamos 0 resultados en la siguiente página
-      return true;
-    }
-
-    // Para otros servidores, usar la lógica original
-    return resultsCount >= 20;
   }
 
   Widget _buildMangaList() {
